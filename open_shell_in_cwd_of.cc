@@ -26,21 +26,19 @@ xprop _NET_WM_PID | cut -d' ' -f3
 #include <X11/Xproto.h>
 #include <X11/Xmu/WinUtil.h>
 
-static char *ProgramName;
-
-#define SelectButtonAny (-1)
-#define SelectButtonFirst (-2)
-
 namespace {
-void _X_NORETURN Exit(int code, Display *dpy)
+void _X_NORETURN safe_exit_x11(int code, Display *display,
+                               const std::string &error_msg = std::string())
 {
-    if(dpy) {
-        XCloseDisplay(dpy);
+    if(code && !error_msg.empty())
+        std::cerr << error_msg << "\n";
+    if(display) {
+        XCloseDisplay(display);
     }
     exit(code);
 }
 
-XID get_window_id(Display *dpy, int screen, int button, const char *msg)
+XID get_window_id(Display *display, int screen, int button, const char *msg)
 {
     Cursor cursor;        /* cursor to use when selecting */
     Window root;          /* the current root */
@@ -48,14 +46,13 @@ XID get_window_id(Display *dpy, int screen, int button, const char *msg)
     int retbutton = -1;   /* button used to select window */
     int pressed = 0;      /* count of number of buttons pressed */
 
+// one function takes a ask of type long, the other of type unsigned int..
 #define MASK (ButtonPressMask | ButtonReleaseMask)
 
-    root = RootWindow(dpy, screen);
-    cursor = XCreateFontCursor(dpy, XC_pirate);
-    if(cursor == None) {
-        std::cerr << "unable to create selection cursor\n";
-        Exit(1, dpy);
-    }
+    root = RootWindow(display, screen);
+    cursor = XCreateFontCursor(display, XC_pirate);
+    if(cursor == None)
+        safe_exit_x11(1, display, "unable to create selection cursor");
 
     std::cout << "Select " << msg << " with ";
     if(button == -1)
@@ -63,19 +60,17 @@ XID get_window_id(Display *dpy, int screen, int button, const char *msg)
     else
         std::cout << "button " << button;
     std::cout << "....\n";
-    XSync(dpy, 0); /* give xterm a chance */
+    XSync(display, 0); /* give xterm a chance */
 
-    if(XGrabPointer(dpy, root, False, MASK, GrabModeSync, GrabModeAsync, None,
-                    cursor, CurrentTime) != GrabSuccess) {
-        std::cerr << "unable to grab cursor\n";
-        Exit(1, dpy);
-    }
+    if(XGrabPointer(display, root, False, MASK, GrabModeSync, GrabModeAsync, None,
+                    cursor, CurrentTime) != GrabSuccess)
+        safe_exit_x11(1, display, "unable to grab cursor");
 
     while(retwin == None || pressed != 0) {
         XEvent event;
 
-        XAllowEvents(dpy, SyncPointer, CurrentTime);
-        XWindowEvent(dpy, root, MASK, &event);
+        XAllowEvents(display, SyncPointer, CurrentTime);
+        XWindowEvent(display, root, MASK, &event);
         switch(event.type) {
         case ButtonPress:
             if(retwin == None) {
@@ -93,127 +88,54 @@ XID get_window_id(Display *dpy, int screen, int button, const char *msg)
         } /* end switch */
     }     /* end for */
 
-    XUngrabPointer(dpy, CurrentTime);
-    XFreeCursor(dpy, cursor);
-    XSync(dpy, 0);
+    XUngrabPointer(display, CurrentTime);
+    XFreeCursor(display, cursor);
+    XSync(display, 0);
 
     return ((button == -1 || retbutton == button) ? retwin : None);
-}
-
-/* Return True if the property WM_STATE is set on the window, otherwise
- * return False.
- */
-Bool wm_state_set(Display *dpy, Window win)
-{
-    std::cout << "wm_state_set\n";
-    Atom wm_state;
-    Atom actual_type;
-    int success;
-    int actual_format;
-    unsigned long nitems, remaining;
-    unsigned char *prop = NULL;
-
-    wm_state = XInternAtom(dpy, "WM_STATE", True);
-    if(wm_state == None)
-        return False;
-    success = XGetWindowProperty(dpy, win, wm_state, 0L, 0L, False,
-                                 AnyPropertyType, &actual_type, &actual_format,
-                                 &nitems, &remaining, &prop);
-    if(prop)
-        XFree((char *)prop);
-    std::cout << "wm_state_set success = "
-              << ((success == Success && actual_type != None && actual_format)
-        ? "true"
-        : "false") << "\n";
-    return (success == Success && actual_type != None && actual_format);
-}
-
-/* Using a heuristic method, return True if a window manager is running,
- * otherwise, return False.
- */
-Bool wm_running(Display *dpy, int screenno)
-{
-    std::cout << "wm_running\n";
-    XWindowAttributes xwa;
-    Status status;
-
-    status = XGetWindowAttributes(dpy, RootWindow(dpy, screenno), &xwa);
-    std::cout << "wm_running status = " << status << "\n";
-    return (status && ((xwa.all_event_masks & SubstructureRedirectMask)
-                       || (xwa.all_event_masks & SubstructureNotifyMask)));
 }
 }
 
 int main(int argc, char *argv[])
 {
-    Display *dpy = NULL;
-    char *displayname = NULL; /* name of server to contact */
+    Display *display = NULL;
     XID id = None;            /* resource to kill */
-    int button;               /* button number or negative for all */
 
-    ProgramName = argv[0];
-    button = SelectButtonFirst;
+    display = XOpenDisplay(nullptr);
+    if(!display)
+        safe_exit_x11(1, display, std::string("unable to open display \"")
+                                  + std::string(XDisplayName(nullptr))
+                                  + std::string("\"\n"));
 
-    dpy = XOpenDisplay(displayname);
-    if(!dpy) {
-        std::cerr << "unable to open display \""
-                  << XDisplayName(displayname) << "\"\n";
-        Exit(1, dpy);
-    }
-    const int screenno = DefaultScreen(dpy);
+    // choose a window
+    unsigned char pointer_map[256]; /* 8 bits of pointer num */
+    if(XGetPointerMapping(display, pointer_map, 256) <= 0)
+        safe_exit_x11(1, display, "no pointer mapping, can't select window");
 
-    // if no id was given, we need to choose a window
-    if(id == None) {
-        unsigned char pointer_map[256]; /* 8 bits of pointer num */
-        int count, j;
-        unsigned int ub = (unsigned int)button;
+    // select first button
+    int button = (int)((unsigned int)pointer_map[0]);
 
-        count = XGetPointerMapping(dpy, pointer_map, 256);
-        if(count <= 0) {
-            std::cerr << "no pointer mapping, can't select window\n";
-            Exit(1, dpy);
-        }
-
-        if(button >= 0) { /* check button */
-            for(j = 0; j < count; j++) {
-                if(ub == (unsigned int)pointer_map[j])
-                    break;
-            }
-            if(j == count) {
-                std::cerr << "no button number " << ub << " in pointer map, "
-                    "can't select window\n";
-            Exit(1, dpy);
-            }
-        } else { /* get first entry */
-            button = (int)((unsigned int)pointer_map[0]);
-        }
-
-        if((id = get_window_id(dpy, screenno, button,
-                               "the window whose client you wish to kill"))) {
-            if(id == RootWindow(dpy, screenno))
-                id = None;
-            else {
-                XID indicated = id;
-                if((id = XmuClientWindow(dpy, indicated)) == indicated) {
-
-                    /* Try not to kill the window manager when the user
-                     * indicates an icon to xkill.
-                     */
-
-                    if(!wm_state_set(dpy, id) && wm_running(dpy, screenno))
-                        id = None;
-                }
+    const int screenno = DefaultScreen(display);
+    if((id = get_window_id(display, screenno, button,
+                           "the window whose client you wish to kill"))) {
+        if(id == RootWindow(display, screenno))
+            id = None;
+        else {
+            std::cout << "1. " << id << "\n";
+            XID indicated = id;
+            if((id = XmuClientWindow(display, indicated)) == indicated) {
+                safe_exit_x11(1, display, "Wrong selection.");
             }
         }
     }
 
-    if(id != None) {
-        std::cout << "killing creator of resource " << id << "\n";
-        XSync(dpy, 0); /* give xterm a chance */
-        XKillClient(dpy, id);
-        XSync(dpy, 0);
-    }
+    if(id == None)
+        safe_exit_x11(1, display, "No window found.");
+    std::cout << "killing creator of resource " << id << "\n";
+    XSync(display, 0); /* give xterm a chance */
+    XKillClient(display, id);
+    XSync(display, 0);
 
-    Exit(0, dpy);
+    safe_exit_x11(0, display);
     return 0;
 }

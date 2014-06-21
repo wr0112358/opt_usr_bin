@@ -1,5 +1,5 @@
 open_shell:
-	g++ -Wall open_shell_in_cwd_of.cc -lX11 -lXmu -o open_shell_in_cwd_of
+	g++ -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -lX11 -lXmu -o open_shell_in_cwd_of
 
 install:
 	cp crypto_mount /opt/usr/bin
