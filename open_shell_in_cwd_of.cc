@@ -229,6 +229,10 @@ int main(int argc, char *argv[])
         safe_exit_x11(1, display, "Wrong selection.");
 
     const auto pid = get_pid(display, id);
+// TODO: pid is parent terminals pid.
+// -> get shell child process
+// -> call readlink("/proc/<child-pid>/cwd") instead of parsing environ file
+
     const auto pwd = get_pwd_of(pid);
     if(pwd.empty())
         std::cerr << "get_pwd_of failed\n";
@@ -241,7 +245,7 @@ int main(int argc, char *argv[])
 
     std::cout << "killing creator of resource " << id << "\n";
     XSync(display, 0); // give xterm a chance
-    XKillClient(display, id);
+    //XKillClient(display, id);
     XSync(display, 0);
 
     safe_exit_x11(0, display);
