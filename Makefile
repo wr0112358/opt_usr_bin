@@ -1,5 +1,13 @@
+default:
+	@echo "no target specified."
+
 open_shell:
 	g++ -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -lX11 -lXmu -o open_shell_in_cwd_of
+
+clean:
+	rm -f open_shell_in_cwd_of
+
+all: open_shell
 
 install:
 	cp crypto_mount /opt/usr/bin

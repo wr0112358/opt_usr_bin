@@ -28,7 +28,9 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <fstream>
 #include <iostream>
 #include <string>
+#ifdef TOTAL_REGEX_OVERLOAD
 #include <regex>
+#endif
 #include <vector>
 
 namespace {
@@ -119,17 +121,6 @@ unsigned long get_pid(Display *display, Window window)
     return pid;
 }
 
-
-inline size_t get_file_length(std::ifstream &fp)
-{
-    fp.seekg(0, fp.end);
-    const auto length = fp.tellg();
-    if (length == std::fstream::pos_type(-1))
-        return 0;
-    fp.seekg(0, fp.beg);
-    return length;
-}
-
 inline size_t read_file(const std::string &file_name, std::string &buff)
 {
     std::ifstream fp(file_name);
@@ -140,6 +131,7 @@ inline size_t read_file(const std::string &file_name, std::string &buff)
     return fp.gcount();
 }
 
+#ifdef TOTAL_REGEX_OVERLOAD
 inline std::vector<std::string> split(const std::string &input,
                                       const std::regex &regex)
 {
@@ -147,6 +139,27 @@ inline std::vector<std::string> split(const std::string &input,
     std::sregex_token_iterator first{input.begin(), input.end(), regex, -1};
     std::sregex_token_iterator last;
     return {first, last};
+}
+#endif
+
+inline std::vector<std::string> split(const std::string &input,
+                                      const std::string &delim)
+{
+    std::vector<std::string> tokens;
+    std::string::size_type start = 0;
+    std::string::size_type end;
+
+    for(;;) {
+        end = input.find(delim, start);
+        tokens.push_back(input.substr(start, end - start));
+        // We just copied the last token
+        if(end == std::string::npos)
+            break;
+        // Exclude the delimiter in the next search
+        start = end + delim.size();
+    }
+
+    return tokens;
 }
 
 inline bool string_starts_with(const std::string &str,
@@ -163,7 +176,11 @@ std::string get_pwd_of(pid_t pid)
     const auto size = read_file(path, file_buffer);
     std::cout << "read " << size << "bytes from " << path << "\n";
 
+#ifdef TOTAL_REGEX_OVERLOAD
     const auto tokens = split(file_buffer, std::regex(R"(('.'|'\\0'))"));
+#endif
+    const std::string DELIM = {'\0'};
+    const auto tokens = split(file_buffer, DELIM);
 
     for(const auto & token: tokens) {
         const std::string PREFIX = "PWD=";
