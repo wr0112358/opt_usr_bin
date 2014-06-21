@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# expects user defined variables
+# USER_GLOBALS_LUKS_PARTITIONS := array with device paths
+# USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH := array with mount paths
+# USER_GLOBALS_LUKS_NAMES := array with luks names
+source ~/.user_globals
+
+
+## TODO:
+# error checking:
+# - e.g. for open, device existant, not open already...
+# - print status on success/error
+# - only works now if all LUKS targets use the same key
+# - show mapping <real device, luks name>
+
+function open_c
+{
+    local open_command=""
+    local names_count=${#USER_GLOBALS_LUKS_NAMES[@]}
+    local partitions_count=${#USER_GLOBALS_LUKS_PARTITIONS[@]}
+
+    # TODO: KEY as local variable and overwrite it immediately?
+    read -s -p "Enter crypto key:" KEY
+    echo ""
+
+
+    for (( i = 0 ; i < $names_count ; i++ )); do
+	echo ${USER_GLOBALS_LUKS_NAMES[$i]}
+	echo ${USER_GLOBALS_LUKS_PARTITIONS[$i]}
+	open_command=$open_command" echo $KEY | cryptsetup luksOpen ${USER_GLOBALS_LUKS_PARTITIONS[$i]} ${USER_GLOBALS_LUKS_NAMES[$i]};"
+    done
+
+    echo "running command: $open_command"
+    su --command="$open_command"
+
+    KEY=""
+}
+
+function close_c
+{
+    local close_command=""
+    local names_count=${#USER_GLOBALS_LUKS_NAMES[@]}
+
+    for (( i = 0 ; i < $names_count ; i++ )); do
+	close_command=$close_command" cryptsetup luksClose ${USER_GLOBALS_LUKS_NAMES[$i]};"
+    done
+
+    echo "running command: $close_command"
+    su --command="$close_command"
+}
+
+function mount_c
+{
+    local mount_command=""
+    local names_count=${#USER_GLOBALS_LUKS_NAMES[@]}
+    local mount_path_count=${#USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[@]}
+
+    for (( i = 0 ; i < $names_count ; i++ )); do
+	mount_command=$mount_command" mount /dev/mapper/${USER_GLOBALS_LUKS_NAMES[$i]} ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]};"
+    done
+
+    echo "running command: $mount_command"
+    su --command="$mount_command"
+}
+
+function umount_c
+{
+    local umount_command=""
+    local mount_path_count=${#USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[@]}
+
+    for (( i = 0 ; i < $mount_path_count ; i++ )); do
+	echo ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]}
+	umount_command=$umount_command" umount ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]};"
+    done
+
+    echo "running command: $umount_command"
+    su --command="$umount_command"
+}
+
+function is_mounted
+{    
+    echo "not implemented"
+# requires root...
+#    cryptsetup status $name
+#    local state=$?
+#    echo "state=$state"
+#    cryptsetup status 
+#    state=$?
+#    echo "state=$state"
+}
+
+function usage
+{
+    printf "USAGE:\n$0\n\to(pen)\n\tc(lose)\n\tm(ount)\n\tu(mount)\n\th(elp)\ns(status)\tprint status. Returns 0 if mounted and open. Non 0 else.\n"
+}
+
+function test_input
+{
+    local names_count=${#USER_GLOBALS_LUKS_NAMES[@]}
+    local mount_path_count=${#USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[@]}
+    local partitions_count=${#USER_GLOBALS_LUKS_PARTITIONS[@]}
+    [ ! $names_count -eq $mount_path_count ] && echo "config error" && exit 1
+    [ ! $names_count -eq $partitions_count ] && echo "config error" && exit 1
+
+#    for (( i = 0 ; i < $names_count ; i++ )); do
+#	echo ${USER_GLOBALS_LUKS_NAMES[$i]}
+#	echo ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]}
+#	echo ${USER_GLOBALS_LUKS_PARTITIONS[$i]}
+#    done
+}
+
+
+test_input
+
+case $1 in
+    o*)
+	open_c
+	;;
+    c*)
+	close_c
+	;;
+    m*)
+	mount_c
+	;;
+    u*)
+	umount_c
+	;;
+    s*)
+	is_mounted
+	;;
+    *)
+	usage
+	;;
+esac
+

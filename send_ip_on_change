@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# expects a defined variable USER_GLOBALS_DEFAULT_MAIL
+source ~/.user_globals
+
+usr=$(ls -l ~/.user_globals | awk '{ print $3 }')
+grp=$(ls -l ~/.user_globals | awk '{ print $4 }')
+ip_file=/tmp/.send_ip_on_change
+log_file=/tmp/.send_ip_on_change.log
+mail=$USER_GLOBALS_DEFAULT_MAIL
+current_ip=$(dig +short myip.opendns.com @resolver1.opendns.com)
+
+echo "mail=$mail $usr $grp"
+
+function log
+{
+	echo $(date) >> $log_file
+	echo $1 >> $log_file
+}
+
+function send_mail
+{
+	mail -s "ip changed" $mail < $ip_file >> $log_file 2>&1
+}
+
+function info
+{
+    log "running as $(id -u)"
+}
+
+old_ip=$current_ip
+[ ! -f $ip_file ] && echo $current_ip > $ip_file && old_ip="n/a"
+
+[ $old_ip != $current_ip ] && echo $current_ip > $ip_file && send_mail  && log "sent mail"
+
+chown $usr:$grp $ip_file
+
+info
