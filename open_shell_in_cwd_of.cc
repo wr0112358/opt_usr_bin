@@ -1,5 +1,4 @@
 /*
-Code based on xkill.c
 
 What this program does:
 1. change mouse cursor(like xkill does)
@@ -11,23 +10,26 @@ What this program does:
 5. open shell at mousepos with cwd set to $pids cwd
 
 # TODO
-- xkill does something very similar
+- reduce headers
 - bind to a key
+- xmu method really needed?
 
-- xprop does it too:
-xprop _NET_WM_PID | cut -d' ' -f3
-
+Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 */
 
-#include <iostream>
-#include <cstdlib>
-#include <cctype>
-#include <X11/Xos.h>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
-#include <X11/cursorfont.h>
-#include <X11/Xproto.h>
 #include <X11/Xmu/WinUtil.h>
+#include <X11/Xos.h>
+#include <X11/Xproto.h>
+#include <X11/cursorfont.h>
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <regex>
+#include <vector>
 
 namespace {
 void _X_NORETURN safe_exit_x11(int code, Display *display,
@@ -116,6 +118,62 @@ unsigned long get_pid(Display *display, Window window)
 
     return pid;
 }
+
+
+inline size_t get_file_length(std::ifstream &fp)
+{
+    fp.seekg(0, fp.end);
+    const auto length = fp.tellg();
+    if (length == std::fstream::pos_type(-1))
+        return 0;
+    fp.seekg(0, fp.beg);
+    return length;
+}
+
+inline size_t read_file(const std::string &file_name, std::string &buff)
+{
+    std::ifstream fp(file_name);
+    buff.resize(4096);
+    char *begin = &*buff.begin();
+    fp.read(begin, 4096);
+
+    return fp.gcount();
+}
+
+inline std::vector<std::string> split(const std::string &input,
+                                      const std::regex &regex)
+{
+    // passing -1 as the submatch index parameter performs splitting
+    std::sregex_token_iterator first{input.begin(), input.end(), regex, -1};
+    std::sregex_token_iterator last;
+    return {first, last};
+}
+
+inline bool string_starts_with(const std::string &str,
+                               const std::string &prefix)
+{
+    return std::equal(prefix.begin(), prefix.end(), str.begin());
+}
+
+// returns empty string on failure
+std::string get_pwd_of(pid_t pid)
+{
+    const std::string path = "/proc/" + std::to_string(pid) + "/environ";
+    std::string file_buffer;
+    const auto size = read_file(path, file_buffer);
+    std::cout << "read " << size << "bytes from " << path << "\n";
+
+    const auto tokens = split(file_buffer, std::regex(R"(('.'|'\\0'))"));
+
+    for(const auto & token: tokens) {
+        const std::string PREFIX = "PWD=";
+        if(string_starts_with(token, PREFIX)) {
+            std::cout << "PWD-token = \"" << token << "\"\n";
+            return token.substr(PREFIX.length(), token.length());
+        }
+    }
+    return std::string();
+}
 }
 
 int main(int argc, char *argv[])
@@ -154,7 +212,16 @@ int main(int argc, char *argv[])
         safe_exit_x11(1, display, "Wrong selection.");
 
     const auto pid = get_pid(display, id);
-    (void)pid;
+    const auto pwd = get_pwd_of(pid);
+    if(pwd.empty())
+        std::cerr << "get_pwd_of failed\n";
+
+// TODO $TERM from environ is interesting too.
+// contains wrong binary name for urxvt256c -> TERM=rxvt-unicode-256color
+// TODO execl("$TERM","$TERM",param,param1,(char *)0);//EDIT!!!
+//  urxvt -e /bin/sh -c 'cd /tmp && /bin/bash'
+    
+
     std::cout << "killing creator of resource " << id << "\n";
     XSync(display, 0); // give xterm a chance
     XKillClient(display, id);
