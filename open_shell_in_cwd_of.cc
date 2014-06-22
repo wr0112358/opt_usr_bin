@@ -276,18 +276,30 @@ struct proc_type
     }
 };
 
-
-struct child_processes
+// given an initialized object of type proc_type, this class constructs
+// a list of child processes for 
+class child_processes
 {
+private:
     using map_type = std::map<pid_t, std::list<pid_t> >;
     map_type map;
     const std::list<pid_t> empty_list;
 
-    // number of entries is known..
-    explicit child_processes(const proc_type & proc_content)
+public:
+    const bool recursive;
+
+public:
+    // TODO: number of entries is known..
+    child_processes(const proc_type &proc_content, bool recursive = false)
+        : recursive(recursive)
     {
         for(const auto &pid_content: proc_content.pid)
-            map[pid_content.second.pid].push_back(pid_content.second.stat.ppid);
+            map[pid_content.second.stat.ppid].push_back(
+                pid_content.second.stat.pid);
+
+        if(recursive) {
+            // TODO
+        }
     }
 
     // return empty list on failure
@@ -306,7 +318,7 @@ struct child_processes
 bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
 {
     std::string file_buffer;
-    const auto size = read_file(path, file_buffer);
+    read_file(path, file_buffer);
     const std::string DELIM = {' '};
     const auto tokens = split(file_buffer, DELIM);
     if(tokens.empty())
@@ -408,18 +420,25 @@ int main(int argc, char *argv[])
 // -> get shell child process
 // -> call readlink("/proc/<child-pid>/cwd") instead of parsing environ file
 
-    const auto pwd = get_pwd_of(pid);
-    if(pwd.empty())
-        std::cerr << "get_pwd_of failed\n";
-
     proc_type proc_content;
     proc_iterate(proc_content);
     const child_processes children(proc_content);
-    std::cout << pid << ":";
+
+    {
+        std::cout << pid << ":";
+        const auto &child_list = children.get(pid);
+        for(const auto &c: child_list)
+            std::cout << " " << c;
+        std::cout << "\n";
+    }
+
     const auto &child_list = children.get(pid);
-    for(const auto &c: child_list)
-        std::cout << " " << c;
-    std::cout << "\n";
+    const auto pid_of_interest = (child_list.empty() ? pid : child_list.back());
+    const auto pwd = get_pwd_of(pid_of_interest);
+    if(pwd.empty())
+        std::cerr << "get_pwd_of failed\n";
+
+
 // TODO $TERM from environ is interesting too.
 // contains wrong binary name for urxvt256c -> TERM=rxvt-unicode-256color
 // TODO execl("$TERM","$TERM",param,param1,(char *)0);//EDIT!!!
