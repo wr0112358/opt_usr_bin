@@ -28,10 +28,12 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <list>
 #ifdef TOTAL_REGEX_OVERLOAD
 #include <regex>
 #endif
 #include <string>
+#include <tuple>
 #include <unistd.h>
 #include <vector>
 
@@ -228,18 +230,19 @@ struct proc_type
         return true;
     }
 
-    const pid_type::iterator get_pid(pid_t p)
+    const pid_type::iterator get_pid(pid_t p) const
     {
         proc_pid_type tmp; tmp.pid = p;
         pid_cmp_type cmp;
-        auto it = std::lower_bound(std::begin(pid), std::end(pid), tmp, cmp);
-        if(it->pid != p)
+        const auto it
+            = std::lower_bound(std::begin(pid), std::end(pid), tmp, cmp);
+        if((it != std::end(pid)) && (p < it->pid))
             return std::end(pid);
         return it;
     }
 
     // returns empty pid_type on failure
-    pid_type get_children(pid_t p);
+    pid_type get_children(pid_t p) const
     {
         const auto &pid_obj = get_pid(p);
         if(pid_obj == std::end(pid))
@@ -247,6 +250,47 @@ struct proc_type
         
     }
 };
+
+
+struct child_processes
+{
+    using map_entry_type = std::pair<pid_t, std::list<pid_t> >;
+    using map_type = std::vector<map_entry_type>;
+    map_type map;
+    struct cmp_type {
+        bool operator()(const map_entry_type &lhs, const map_entry_type &rhs)
+        {
+            return lhs.first > rhs.second;
+        }
+    };
+
+    explicit child_processes(const proc_type & proc_content)
+    {
+        cmp_type cmp;
+        for(const auto &pid_content: proc_content.pid) {
+            auto it = std::lower_bound(std::begin(map), std::end(map),
+                                       proc_content, cmp);
+            auto & 
+            if
+            map.insert(it, proc_content);
+        }
+    }
+
+// return empty list on failure
+    std::list<pid_t> & get_children(pid_t p) const
+    {
+        const auto tmp = std::make_pair(p, std::list<pid_t>());
+        cmp_type cmp;
+        auto it
+            = std::lower_bound(std::begin(map), std::end(map),
+                               tmp, cmp);
+        if((it == std::end(map))
+           || (it != std::end(map) && (p < it->first)))
+           return tmp.second;
+        return it->second;
+    }
+};
+
 
 bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
 {
