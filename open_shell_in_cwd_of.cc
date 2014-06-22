@@ -23,15 +23,19 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <X11/Xos.h>
 #include <X11/Xproto.h>
 #include <X11/cursorfont.h>
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <string>
 #ifdef TOTAL_REGEX_OVERLOAD
 #include <regex>
 #endif
+#include <string>
+#include <unistd.h>
 #include <vector>
+
+#include "readdir.hh"
 
 namespace {
 void _X_NORETURN safe_exit_x11(int code, Display *display,
@@ -162,12 +166,135 @@ inline std::vector<std::string> split(const std::string &input,
     return tokens;
 }
 
+/*
 inline bool string_starts_with(const std::string &str,
                                const std::string &prefix)
 {
     return std::equal(prefix.begin(), prefix.end(), str.begin());
 }
+*/
 
+inline std::string readlink(const std::string &path)
+{
+    std::string buffer;
+    buffer.resize(1024);
+    if(::readlink(path.c_str(), &buffer[0], 1024) == -1)
+        return std::string();
+
+    return buffer;
+}
+
+// returns empty string on failure
+std::string get_pwd_of(pid_t pid)
+{
+    const std::string path = "/proc/" + std::to_string(pid) + "/cwd";
+    const auto cwd = readlink(path);
+    std::cout << "readlink(" << path << ") -> " << cwd << "\n";
+    return cwd;
+}
+
+struct proc_pid_stat_type
+{
+    pid_t pid;
+    std::string comm;
+    char state; //enum { R, S, D, Z, T, W } state;
+    pid_t ppid;
+    pid_t pgrp;
+    pid_t session;
+};
+
+struct proc_pid_type
+{
+    pid_t pid;
+    proc_pid_stat_type stat;
+};
+
+struct proc_type
+{
+    using pid_type = std::vector<proc_pid_type>;
+    pid_type pid;
+    struct pid_cmp_type {
+        bool operator()(const proc_pid_type &lhs, const proc_pid_type &rhs)
+        {
+            return lhs.pid > rhs.pid;
+        }
+    };
+
+    bool insert_pid_type(const proc_pid_type &c)
+    {
+        pid_cmp_type cmp;
+        auto it = std::lower_bound(std::begin(pid), std::end(pid), c, cmp);
+        pid.insert(it, c);
+        return true;
+    }
+
+    const pid_type::iterator get_pid(pid_t p)
+    {
+        proc_pid_type tmp; tmp.pid = p;
+        pid_cmp_type cmp;
+        auto it = std::lower_bound(std::begin(pid), std::end(pid), tmp, cmp);
+        if(it->pid != p)
+            return std::end(pid);
+        return it;
+    }
+
+    // returns empty pid_type on failure
+    pid_type get_children(pid_t p);
+    {
+        const auto &pid_obj = get_pid(p);
+        if(pid_obj == std::end(pid))
+           return false;
+        
+    }
+};
+
+bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
+{
+    std::string file_buffer;
+    const auto size = read_file(path, file_buffer);
+    std::cout << "read " << size << "bytes from " << path << "\n";
+
+    const std::string DELIM = {' '};
+    const auto tokens = split(file_buffer, DELIM);
+    if(tokens.empty())
+        return false;
+    content.pid = std::stol(tokens[0]);
+    content.comm.assign(tokens[1]);
+    content.state = tokens[2][0];
+    content.ppid = std::stol(tokens[3]);
+    content.pgrp = std::stol(tokens[4]);
+    content.session = std::stol(tokens[5]);
+
+    return false;
+}
+
+bool proc_iterate(proc_type &proc_content)
+{
+    auto f = [&proc_content](const std::string &base_path,
+                                     const struct dirent *p) {
+        /*
+                std::cout << "struct dirent = { " << std::endl
+                          << "\t.d_ino = " << std::to_string(p->d_ino) <<
+           std::endl
+                          << "\t.d_off = " << std::to_string(p->d_off) <<
+           std::endl
+                          << "\t.d_reclen = " << std::to_string(p->d_reclen)
+                          << std::endl << "\t.d_name = \"" << p->d_name << "\""
+                          << std::endl << "}" << std::endl;
+        */
+        const std::string path = base_path + "/" + p->d_name;
+        if(isdigit(p->d_name[0])) {
+            proc_pid_type pid_content;
+            proc_pid_stat(path + "/stat", pid_content.stat);
+            proc_content.insert_pid_type(pid_content);
+        }
+    };
+
+    readdir_cxx::dir::readdir("/proc", f);
+    return true;
+}
+
+/*
 // returns empty string on failure
 std::string get_pwd_of(pid_t pid)
 {
@@ -191,6 +318,8 @@ std::string get_pwd_of(pid_t pid)
     }
     return std::string();
 }
+*/
+
 }
 
 int main(int argc, char *argv[])
@@ -237,6 +366,8 @@ int main(int argc, char *argv[])
     if(pwd.empty())
         std::cerr << "get_pwd_of failed\n";
 
+    proc_type proc_content;
+    proc_iterate(proc_content);
 // TODO $TERM from environ is interesting too.
 // contains wrong binary name for urxvt256c -> TERM=rxvt-unicode-256color
 // TODO execl("$TERM","$TERM",param,param1,(char *)0);//EDIT!!!
