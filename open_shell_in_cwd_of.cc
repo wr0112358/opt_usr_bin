@@ -1,6 +1,10 @@
 /*
 
-What this program does:
+Open a shell with pwd set to working dir of current window.
+Usecase: Working in a shell window with emacs the need for an additional shell
+         instance set to the same pwd regularly arises.
+
+What this program should do:
 1. change mouse cursor(like xkill does)
 2. wait for click (or better wait for user-defined key, like <space >
                    and let user cycle through windows with alt-tab
@@ -12,7 +16,7 @@ What this program does:
 # TODO
 - reduce headers
 - bind to a key
-- xmu method really needed?
+- see TODOs in code
 
 Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 */
@@ -25,7 +29,6 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <X11/cursorfont.h>
 #include <algorithm>
 #include <cctype>
-//#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -63,7 +66,7 @@ XID get_window_id(Display *display, int screen, int button, const char *msg)
     int retbutton = -1;   /* button used to select window */
     int pressed = 0;      /* count of number of buttons pressed */
 
-// one function takes a ask of type long, the other of type unsigned int..
+// one function takes a mask of type long, the other of type unsigned int..
 #define MASK (ButtonPressMask | ButtonReleaseMask)
 
     root = RootWindow(display, screen);
@@ -172,14 +175,6 @@ inline std::vector<std::string> split(const std::string &input,
     return tokens;
 }
 
-/*
-inline bool string_starts_with(const std::string &str,
-                               const std::string &prefix)
-{
-    return std::equal(prefix.begin(), prefix.end(), str.begin());
-}
-*/
-
 inline std::string readlink(const std::string &path)
 {
     std::string buffer;
@@ -188,8 +183,8 @@ inline std::string readlink(const std::string &path)
     if(byte_count == -1)
         return std::string();
 
-    // readlink(3) not necessarily returns a null-terminated string.
-    // Use byte_count to determine length.
+    // readlink(3) not necessarily returns a null-terminated string. Use
+    // byte_count to determine length.
     buffer.resize(byte_count);
     return buffer;
 }
@@ -199,7 +194,6 @@ std::string get_pwd_of(pid_t pid)
 {
     const std::string path = "/proc/" + std::to_string(pid) + "/cwd";
     const auto cwd = readlink(path);
-    std::cout << "readlink(" << path << ") -> " << cwd << "\n";
     return cwd;
 }
 
@@ -318,7 +312,7 @@ bool proc_iterate(proc_type &proc_content)
     return true;
 }
 
-/*
+/* parsing proc pid environ to get pwd was a deadend
 // returns empty string on failure
 std::string get_pwd_of(pid_t pid)
 {
@@ -369,6 +363,7 @@ int main(int argc, char *argv[])
     if(id == RootWindow(display, screenno))
         safe_exit_x11(1, display, "Root window is ignored.");
 
+    // TODO:xmu method really needed?
     // The XmuClientWindow function finds a window, at or below the specified
     // window, that has a WM_STATE property. If such a window is found, it is
     // returned; otherwise the argument window is returned.
@@ -395,14 +390,15 @@ int main(int argc, char *argv[])
     }
 
     const auto &child_list = children.get(window_pid);
-    const auto pid_of_interest = (child_list.empty() ? window_pid : child_list.back());
+    const auto pid_of_interest
+        = (child_list.empty() ? window_pid : child_list.back());
     const auto pwd = get_pwd_of(pid_of_interest);
     if(pwd.empty())
         std::cerr << "get_pwd_of failed\n";
 
-    std::array<std::string, 5> cpp_args(
-        //{{"-e", "/bin/bash", "-c", "\"cd " + pwd + " && /bin/bash\""}});
-        {{"/bin/urxvt256c", "-e", "/bin/bash", "-c", "\"cd " + pwd + " && /bin/bash\""}});
+    std::array<std::string, 6> cpp_args(
+        {{"/bin/urxvt256c", "-e", "/bin/bash", "-c",
+          "cd " + pwd + " && /bin/bash"}});
     char * const args[] = {
         const_cast<char *const>(cpp_args[0].c_str()),
         const_cast<char *const>(cpp_args[1].c_str()),
@@ -411,36 +407,24 @@ int main(int argc, char *argv[])
         const_cast<char *const>(cpp_args[4].c_str()),
         NULL
     };
-    std::cout << "args = "
-              << "\"" << args[0] << "\" " << "\n\t"
-              << "\"" << args[1] << "\" " << "\n\t"
-              << "\"" << args[2] << "\" " << "\n\t"
-              << "args[3] = \"" << args[3] << "\"\n\t"
-              << "args[4] = \"" << args[4] << "\"\n\t"
-              << "\n"
-              << "\n";
 
     const pid_t fork_pid = fork();
     if(fork_pid == -1)
         perror("fork error");
     else if(fork_pid == 0)
-        execv("/bin/urxvt256c", args);
-    int status;
-    pid_t w_r;
-    if((w_r = waitpid(fork_pid, &status, 0)) == -1)
-        perror("waitpid");
-    std::cout << "waitpid returned: " << w_r << " forkpid: " << fork_pid
-              << "\n";
-// TODO $TERM from environ is interesting too.
-// contains wrong binary name for urxvt256c -> TERM=rxvt-unicode-256color
-// TODO execl("$TERM","$TERM",param,param1,(char *)0);//EDIT!!!
-//  urxvt -e /bin/sh -c 'cd /tmp && /bin/bash'
-    
+        if(execv("/bin/urxvt256c", args))
+            perror("execv");
 
+    int status;
+    if(waitpid(fork_pid, &status, 0) == -1)
+        perror("waitpid");
+
+/* relict from xkill.c
     std::cout << "killing creator of resource " << id << "\n";
     XSync(display, 0); // give xterm a chance
     //XKillClient(display, id);
     XSync(display, 0);
+*/
 
     safe_exit_x11(0, display);
     return 0;
