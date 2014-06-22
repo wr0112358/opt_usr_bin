@@ -212,6 +212,7 @@ struct proc_pid_type
     proc_pid_stat_type stat;
 };
 
+/*
 struct proc_type
 {
     using pid_type = std::vector<proc_pid_type>;
@@ -251,24 +252,53 @@ struct proc_type
         
     }
 };
+*/
+struct proc_type
+{
+    // or better a std::set, with custom compare over proc_pid_type.pid?
+    using pid_type = std::map<pid_t, proc_pid_type>;
+    pid_type pid;
+
+    bool insert_pid_type(const proc_pid_type &c)
+    {
+        const auto ret = pid.insert(std::make_pair(c.pid, c));
+        if(!ret.second)
+            std::cerr << "insert_pid_type failed for pid = " << c.pid << ".\n";
+        return ret.second;
+    }
+
+    const pid_type::const_iterator get_pid(pid_t p) const
+    {
+        const auto ret = pid.find(p);
+        if(ret == std::end(pid))
+            std::cerr << "get_pid failed.\n";
+        return ret;
+    }
+};
 
 
 struct child_processes
 {
     using map_type = std::map<pid_t, std::list<pid_t> >;
     map_type map;
+    const std::list<pid_t> empty_list;
 
+    // number of entries is known..
     explicit child_processes(const proc_type & proc_content)
     {
-
         for(const auto &pid_content: proc_content.pid)
-            map[pid_content.pid].push_back(pid_content.stat.ppid;
+            map[pid_content.second.pid].push_back(pid_content.second.stat.ppid);
     }
 
     // return empty list on failure
-    std::list<pid_t> & get_children(pid_t p) const
+    const std::list<pid_t> & get(pid_t p) const
     {
-        return map[p];
+        const auto ret = map.find(p);
+        if(ret == std::end(map)) {
+            std::cerr << "child_processes::get failed.\n";
+            return empty_list;
+        }
+        return ret->second;
     }
 };
 
@@ -277,12 +307,11 @@ bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
 {
     std::string file_buffer;
     const auto size = read_file(path, file_buffer);
-    std::cout << "read " << size << "bytes from " << path << "\n";
-
     const std::string DELIM = {' '};
     const auto tokens = split(file_buffer, DELIM);
     if(tokens.empty())
         return false;
+
     content.pid = std::stol(tokens[0]);
     content.comm.assign(tokens[1]);
     content.state = tokens[2][0];
@@ -290,27 +319,19 @@ bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
     content.pgrp = std::stol(tokens[4]);
     content.session = std::stol(tokens[5]);
 
-    return false;
+    return true;
 }
 
 bool proc_iterate(proc_type &proc_content)
 {
     auto f = [&proc_content](const std::string &base_path,
                                      const struct dirent *p) {
-        /*
-                std::cout << "struct dirent = { " << std::endl
-                          << "\t.d_ino = " << std::to_string(p->d_ino) <<
-           std::endl
-                          << "\t.d_off = " << std::to_string(p->d_off) <<
-           std::endl
-                          << "\t.d_reclen = " << std::to_string(p->d_reclen)
-                          << std::endl << "\t.d_name = \"" << p->d_name << "\""
-                          << std::endl << "}" << std::endl;
-        */
         const std::string path = base_path + "/" + p->d_name;
         if(isdigit(p->d_name[0])) {
             proc_pid_type pid_content;
-            proc_pid_stat(path + "/stat", pid_content.stat);
+            if(!proc_pid_stat(path + "/stat", pid_content.stat))
+                return;
+            pid_content.pid = pid_content.stat.pid;
             proc_content.insert_pid_type(pid_content);
         }
     };
@@ -393,6 +414,12 @@ int main(int argc, char *argv[])
 
     proc_type proc_content;
     proc_iterate(proc_content);
+    const child_processes children(proc_content);
+    std::cout << pid << ":";
+    const auto &child_list = children.get(pid);
+    for(const auto &c: child_list)
+        std::cout << " " << c;
+    std::cout << "\n";
 // TODO $TERM from environ is interesting too.
 // contains wrong binary name for urxvt256c -> TERM=rxvt-unicode-256color
 // TODO execl("$TERM","$TERM",param,param1,(char *)0);//EDIT!!!
