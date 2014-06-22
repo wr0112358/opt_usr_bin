@@ -29,6 +29,7 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <fstream>
 #include <iostream>
 #include <list>
+#include <map>
 #ifdef TOTAL_REGEX_OVERLOAD
 #include <regex>
 #endif
@@ -254,40 +255,20 @@ struct proc_type
 
 struct child_processes
 {
-    using map_entry_type = std::pair<pid_t, std::list<pid_t> >;
-    using map_type = std::vector<map_entry_type>;
+    using map_type = std::map<pid_t, std::list<pid_t> >;
     map_type map;
-    struct cmp_type {
-        bool operator()(const map_entry_type &lhs, const map_entry_type &rhs)
-        {
-            return lhs.first > rhs.second;
-        }
-    };
 
     explicit child_processes(const proc_type & proc_content)
     {
-        cmp_type cmp;
-        for(const auto &pid_content: proc_content.pid) {
-            auto it = std::lower_bound(std::begin(map), std::end(map),
-                                       proc_content, cmp);
-            auto & 
-            if
-            map.insert(it, proc_content);
-        }
+
+        for(const auto &pid_content: proc_content.pid)
+            map[pid_content.pid].push_back(pid_content.stat.ppid;
     }
 
-// return empty list on failure
+    // return empty list on failure
     std::list<pid_t> & get_children(pid_t p) const
     {
-        const auto tmp = std::make_pair(p, std::list<pid_t>());
-        cmp_type cmp;
-        auto it
-            = std::lower_bound(std::begin(map), std::end(map),
-                               tmp, cmp);
-        if((it == std::end(map))
-           || (it != std::end(map) && (p < it->first)))
-           return tmp.second;
-        return it->second;
+        return map[p];
     }
 };
 
