@@ -25,6 +25,7 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <X11/cursorfont.h>
 #include <algorithm>
 #include <cctype>
+//#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -34,6 +35,8 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <regex>
 #endif
 #include <string>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <tuple>
 #include <unistd.h>
 #include <vector>
@@ -181,9 +184,13 @@ inline std::string readlink(const std::string &path)
 {
     std::string buffer;
     buffer.resize(1024);
-    if(::readlink(path.c_str(), &buffer[0], 1024) == -1)
+    const ssize_t byte_count = ::readlink(path.c_str(), &buffer[0], 1024);
+    if(byte_count == -1)
         return std::string();
 
+    // readlink(3) not necessarily returns a null-terminated string.
+    // Use byte_count to determine length.
+    buffer.resize(byte_count);
     return buffer;
 }
 
@@ -212,47 +219,6 @@ struct proc_pid_type
     proc_pid_stat_type stat;
 };
 
-/*
-struct proc_type
-{
-    using pid_type = std::vector<proc_pid_type>;
-    pid_type pid;
-    struct pid_cmp_type {
-        bool operator()(const proc_pid_type &lhs, const proc_pid_type &rhs)
-        {
-            return lhs.pid > rhs.pid;
-        }
-    };
-
-    bool insert_pid_type(const proc_pid_type &c)
-    {
-        pid_cmp_type cmp;
-        auto it = std::lower_bound(std::begin(pid), std::end(pid), c, cmp);
-        pid.insert(it, c);
-        return true;
-    }
-
-    const pid_type::iterator get_pid(pid_t p) const
-    {
-        proc_pid_type tmp; tmp.pid = p;
-        pid_cmp_type cmp;
-        const auto it
-            = std::lower_bound(std::begin(pid), std::end(pid), tmp, cmp);
-        if((it != std::end(pid)) && (p < it->pid))
-            return std::end(pid);
-        return it;
-    }
-
-    // returns empty pid_type on failure
-    pid_type get_children(pid_t p) const
-    {
-        const auto &pid_obj = get_pid(p);
-        if(pid_obj == std::end(pid))
-           return false;
-        
-    }
-};
-*/
 struct proc_type
 {
     // or better a std::set, with custom compare over proc_pid_type.pid?
@@ -415,30 +381,56 @@ int main(int argc, char *argv[])
     if((id = XmuClientWindow(display, indicated)) == indicated)
         safe_exit_x11(1, display, "Wrong selection.");
 
-    const auto pid = get_pid(display, id);
-// TODO: pid is parent terminals pid.
-// -> get shell child process
-// -> call readlink("/proc/<child-pid>/cwd") instead of parsing environ file
-
+    const auto window_pid = get_pid(display, id);
     proc_type proc_content;
     proc_iterate(proc_content);
     const child_processes children(proc_content);
 
     {
-        std::cout << pid << ":";
-        const auto &child_list = children.get(pid);
+        std::cout << window_pid << ":";
+        const auto &child_list = children.get(window_pid);
         for(const auto &c: child_list)
             std::cout << " " << c;
         std::cout << "\n";
     }
 
-    const auto &child_list = children.get(pid);
-    const auto pid_of_interest = (child_list.empty() ? pid : child_list.back());
+    const auto &child_list = children.get(window_pid);
+    const auto pid_of_interest = (child_list.empty() ? window_pid : child_list.back());
     const auto pwd = get_pwd_of(pid_of_interest);
     if(pwd.empty())
         std::cerr << "get_pwd_of failed\n";
 
+    std::array<std::string, 5> cpp_args(
+        //{{"-e", "/bin/bash", "-c", "\"cd " + pwd + " && /bin/bash\""}});
+        {{"/bin/urxvt256c", "-e", "/bin/bash", "-c", "\"cd " + pwd + " && /bin/bash\""}});
+    char * const args[] = {
+        const_cast<char *const>(cpp_args[0].c_str()),
+        const_cast<char *const>(cpp_args[1].c_str()),
+        const_cast<char *const>(cpp_args[2].c_str()),
+        const_cast<char *const>(cpp_args[3].c_str()),
+        const_cast<char *const>(cpp_args[4].c_str()),
+        NULL
+    };
+    std::cout << "args = "
+              << "\"" << args[0] << "\" " << "\n\t"
+              << "\"" << args[1] << "\" " << "\n\t"
+              << "\"" << args[2] << "\" " << "\n\t"
+              << "args[3] = \"" << args[3] << "\"\n\t"
+              << "args[4] = \"" << args[4] << "\"\n\t"
+              << "\n"
+              << "\n";
 
+    const pid_t fork_pid = fork();
+    if(fork_pid == -1)
+        perror("fork error");
+    else if(fork_pid == 0)
+        execv("/bin/urxvt256c", args);
+    int status;
+    pid_t w_r;
+    if((w_r = waitpid(fork_pid, &status, 0)) == -1)
+        perror("waitpid");
+    std::cout << "waitpid returned: " << w_r << " forkpid: " << fork_pid
+              << "\n";
 // TODO $TERM from environ is interesting too.
 // contains wrong binary name for urxvt256c -> TERM=rxvt-unicode-256color
 // TODO execl("$TERM","$TERM",param,param1,(char *)0);//EDIT!!!
