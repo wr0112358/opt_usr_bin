@@ -14,22 +14,18 @@ What this program should do:
 5. open shell at mousepos with cwd set to $pids cwd
 
 # TODO
-- reduce headers
 - bind to a key
 - see TODOs in code
+- move all non app-specific functions to headers: string_util.hh/proc_util.hh
 
 Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 */
 
-#include <X11/Xatom.h>
+#include <X11/Xatom.h> //XA_CARDINAL
 #include <X11/Xlib.h>
 #include <X11/Xmu/WinUtil.h>
-#include <X11/Xos.h>
-#include <X11/Xproto.h>
-#include <X11/cursorfont.h>
+#include <X11/cursorfont.h> //XC_pirate
 #include <algorithm>
-#include <cctype>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <list>
@@ -38,13 +34,11 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <regex>
 #endif
 #include <string>
-#include <sys/types.h>
 #include <sys/wait.h>
-#include <tuple>
-#include <unistd.h>
+#include <unistd.h> // fork/execv
 #include <vector>
 
-#include "readdir.hh"
+#include "readdir.hh" // TODO: readdir_r: Operation not permitted
 
 namespace {
 void _X_NORETURN safe_exit_x11(int code, Display *display,
@@ -259,6 +253,9 @@ public:
 
         if(recursive) {
             // TODO
+            // - needed for stuff like:
+            //     firefox(why should I need that)
+            //     many subshells
         }
     }
 
@@ -419,7 +416,7 @@ int main(int argc, char *argv[])
     if(waitpid(fork_pid, &status, 0) == -1)
         perror("waitpid");
 
-/* relict from xkill.c
+/* TODO: relict from xkill.c -> need to understand the reason for this first
     std::cout << "killing creator of resource " << id << "\n";
     XSync(display, 0); // give xterm a chance
     //XKillClient(display, id);
