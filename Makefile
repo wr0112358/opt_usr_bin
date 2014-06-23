@@ -14,3 +14,6 @@ install: all
 	cp png2pdf.sh /opt/usr/bin
 	cp send_ip_on_change /opt/usr/bin
 	cp open_shell_in_cwd_of /opt/usr/bin
+
+test:
+	make -C test/ test

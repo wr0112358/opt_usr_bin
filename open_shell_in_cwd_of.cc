@@ -149,6 +149,7 @@ inline std::vector<std::string> split(const std::string &input,
 }
 #endif
 
+// TODO: replace with better tokenizer. see test/
 inline std::vector<std::string> split(const std::string &input,
                                       const std::string &delim)
 {
