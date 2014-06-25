@@ -17,24 +17,37 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 /*
+Open a shell window with pwd set to working dir of current window.
 
-Open a shell with pwd set to working dir of current window.
-Usecase: Working in a shell window with emacs the need for an additional shell
-         instance set to the same pwd regularly arises.
+Usecase
+  Working in a shell window with emacs the need for an additional shell
+  instance set to the same pwd regularly arises.
 
-What this program should do:
+add keybinding under lxde:
+  $ emacs -nw ~/.config/openbox/lxde-rc.xml
+  ...
+  <keybind key="C-1">
+      <action name="Execute">
+          <command>/opt/usr/bin/open_shell_in_cwd_of</command>
+      </action>
+  </keybind>
+  ...
+  $ openbox-lxde --reconfigure
+
+What this program does:
 1. change mouse cursor(like xkill does)
-2. wait for click (or better wait for user-defined key, like <space >
-                   and let user cycle through windows with alt-tab
-                   before pressing space -> avoids mouse!)
+2. wait for click
 3. get pid of clicked window
-4. get cwd from /proc/$pid/...
+4. get cwd from procfs
 5. open shell at mousepos with cwd set to $pids cwd
 
 # TODO
-- bind to a key
 - see TODOs in code
-- move all non app-specific functions to headers: string_util.hh/proc_util.hh
+- move all non app-specific functions to lib
+- instead of mouse-click better wait for user-defined key(maybe <space>) and
+  let user cycle through windows with alt-tab before keypress.
+  -> avoids mouse!
+- make magic values like urxvt256 easier replacable
 
 Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 */
@@ -56,7 +69,7 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <unistd.h> // fork/execv
 #include <vector>
 
-#include "readdir.hh" // TODO: readdir_r: Operation not permitted
+#include "readdir.hh"
 
 namespace {
 void _X_NORETURN safe_exit_x11(int code, Display *display,
@@ -431,6 +444,7 @@ int main(int argc, char *argv[])
         if(execv("/bin/urxvt256c", args))
             perror("execv");
 
+// TODO: don't wait. reparent to init.
     int status;
     if(waitpid(fork_pid, &status, 0) == -1)
         perror("waitpid");
