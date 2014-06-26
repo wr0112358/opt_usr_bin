@@ -288,6 +288,20 @@ public:
             // - needed for stuff like:
             //     firefox(why should I need that)
             //     many subshells
+            /*
+              proc_content.pid := std::map<pid_t, proc_pid_type>
+              map := std::map<pid_t, std::list<pid_t> >;
+              after for-loop map contains:
+              for every child
+            */
+        }
+        std::cout << "map<parent_pid, list<child_pid> > contains:\n";
+        for(const auto &map_content: map) {
+            std::cout << "< " << map_content.first << ", <";
+            for(const auto &children: map_content.second) {
+                std::cout << " " << children << ", ";
+            }
+            std::cout << "> >\n";
         }
     }
 
@@ -444,10 +458,12 @@ int main(int argc, char *argv[])
         if(execv("/bin/urxvt256c", args))
             perror("execv");
 
+/*
 // TODO: don't wait. reparent to init.
     int status;
     if(waitpid(fork_pid, &status, 0) == -1)
         perror("waitpid");
+*/
 
 /* TODO: relict from xkill.c -> need to understand the reason for this first
     std::cout << "killing creator of resource " << id << "\n";
