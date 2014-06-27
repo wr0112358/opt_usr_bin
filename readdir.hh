@@ -104,13 +104,20 @@ inline void readdir_cxx::dir::readdir(
     }
 
     int error;
-    struct dirent *ent;
-    while ((error = readdir_r(dirp, buf, &ent) == 0) && ent) {
-        // std::cout << std::string(ent->d_name) << std::endl;
+    struct dirent *ent = nullptr;
+    do {
+        error = readdir_r(dirp, buf, &ent);
+        if(!ent)
+            break;
+        if(error) {
+            perror(std::string("readdir_r(" + std::string(ent->d_name)
+                               + ") non-fatal error").c_str());
+        }
+        // std::cout <<  << std::endl;
         f(path, ent);
-    }
-    if (error) {
-        errno = error;
+    } while(true);
+
+    if(!ent && error) {
         perror("readdir_r");
         // TODO: eg
         // readdir_r: Operation not permitted
