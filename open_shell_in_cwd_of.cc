@@ -295,6 +295,7 @@ public:
               for every child
             */
         }
+/*
         std::cout << "map<parent_pid, list<child_pid> > contains:\n";
         for(const auto &map_content: map) {
             std::cout << "< " << map_content.first << ", <";
@@ -303,6 +304,7 @@ public:
             }
             std::cout << "> >\n";
         }
+*/
     }
 
     // return empty list on failure
@@ -438,6 +440,9 @@ int main(int argc, char *argv[])
     const auto pwd = get_pwd_of(pid_of_interest);
     if(pwd.empty())
         std::cerr << "get_pwd_of failed\n";
+    std::cout << "Using parameters:\n\twindow_pid: " << window_pid
+              << "\n\tchild_pid: " << pid_of_interest
+              << "\n\tdirectory: " << pwd << "\n";
 
     std::array<std::string, 6> cpp_args(
         {{"/bin/urxvt256c", "-e", "/bin/bash", "-c",
