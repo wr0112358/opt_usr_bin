@@ -201,6 +201,7 @@ inline std::vector<std::string> split(const std::string &input,
     return tokens;
 }
 
+// it is assumed, we have access permissions to path.
 inline std::string readlink(const std::string &path)
 {
     std::string buffer;
@@ -272,39 +273,12 @@ private:
     const std::list<pid_t> empty_list;
 
 public:
-    const bool recursive;
-
-public:
     // TODO: number of entries is known..
-    child_processes(const proc_type &proc_content, bool recursive = false)
-        : recursive(recursive)
+    child_processes(const proc_type &proc_content)
     {
         for(const auto &pid_content: proc_content.pid)
             map[pid_content.second.stat.ppid].push_back(
                 pid_content.second.stat.pid);
-
-        if(recursive) {
-            // TODO
-            // - needed for stuff like:
-            //     firefox(why should I need that)
-            //     many subshells
-            /*
-              proc_content.pid := std::map<pid_t, proc_pid_type>
-              map := std::map<pid_t, std::list<pid_t> >;
-              after for-loop map contains:
-              for every child
-            */
-        }
-/*
-        std::cout << "map<parent_pid, list<child_pid> > contains:\n";
-        for(const auto &map_content: map) {
-            std::cout << "< " << map_content.first << ", <";
-            for(const auto &children: map_content.second) {
-                std::cout << " " << children << ", ";
-            }
-            std::cout << "> >\n";
-        }
-*/
     }
 
     // return empty list on failure
@@ -312,13 +286,41 @@ public:
     {
         const auto ret = map.find(p);
         if(ret == std::end(map)) {
-            std::cerr << "child_processes::get failed.\n";
+            std::cerr << "child_processes::get: " << p
+                      << " has no children. Stopping search.\n";
             return empty_list;
         }
         return ret->second;
     }
 };
 
+// TODO: if user clicks on shell running a root shell. readlink will fail on
+//       the returned pid.
+//       Provide switch to turn on access rights check.
+pid_t get_last_child_pid_before_branch(const proc_type &proc_content,
+                                       pid_t ppid)
+{
+    // - needed for stuff like:
+    //     firefox(why should I need that)
+    //     many subshells
+    const child_processes c(proc_content);
+    const child_processes &child_searcher = c;
+    auto pid_of_interest = ppid;
+    do {
+        const auto &child_list = child_searcher.get(pid_of_interest);
+
+        {
+            std::cout << pid_of_interest << ":";
+            for(const auto &c: child_list)
+                std::cout << " " << c;
+            std::cout << "\n";
+        }
+
+        if(child_list.size() != 1)
+            return pid_of_interest;
+        pid_of_interest = child_list.back();
+    } while(true);
+}
 
 bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
 {
@@ -434,15 +436,21 @@ int main(int argc, char *argv[])
         std::cout << "\n";
     }
 
-    const auto &child_list = children.get(window_pid);
+    std::cout << "\n#######################################################\n"
+              << "Trying new algorithm:\n";
     const auto pid_of_interest
-        = (child_list.empty() ? window_pid : child_list.back());
+        = get_last_child_pid_before_branch(proc_content, window_pid);
+    std::cout << "\n#######################################################\n"
+              << "-> " << pid_of_interest << "\n"
+              << "getpid(" << argv[0] << ") = " << getpid() << "\n";
+
     const auto pwd = get_pwd_of(pid_of_interest);
     if(pwd.empty())
         std::cerr << "get_pwd_of failed\n";
     std::cout << "Using parameters:\n\twindow_pid: " << window_pid
               << "\n\tchild_pid: " << pid_of_interest
               << "\n\tdirectory: " << pwd << "\n";
+
 
     std::array<std::string, 6> cpp_args(
         {{"/bin/urxvt256c", "-e", "/bin/bash", "-c",
@@ -462,20 +470,6 @@ int main(int argc, char *argv[])
     else if(fork_pid == 0)
         if(execv("/bin/urxvt256c", args))
             perror("execv");
-
-/*
-// TODO: don't wait. reparent to init.
-    int status;
-    if(waitpid(fork_pid, &status, 0) == -1)
-        perror("waitpid");
-*/
-
-/* TODO: relict from xkill.c -> need to understand the reason for this first
-    std::cout << "killing creator of resource " << id << "\n";
-    XSync(display, 0); // give xterm a chance
-    //XKillClient(display, id);
-    XSync(display, 0);
-*/
 
     safe_exit_x11(0, display);
     return 0;
