@@ -40,7 +40,7 @@ CATCHED:
 #include <tuple>
 #include <vector>
 
-#include "../../wr011_lib/chrono_util.hh"
+#include "libaan/chrono_util.hh"
 
 inline size_t get_file_length(std::ifstream & fp)
 {
@@ -100,10 +100,15 @@ split2(const std::string &input, const std::string &delim)
 
     for(;;) {
         end = input.find(delim, start);
-        tokens.push_back(std::make_pair(&input.data()[start], end - start));
+
         // We just copied the last token
-        if(end == std::string::npos)
+        if(end == std::string::npos) {
+            tokens.push_back(
+                std::make_pair(&input.data()[start], input.size() - start));
             break;
+        }
+
+        tokens.push_back(std::make_pair(&input.data()[start], end - start));
         // Exclude the delimiter in the next search
         start = end + delim.size();
     }
@@ -116,7 +121,7 @@ test_for_equality(const std::vector<std::string> &split_in,
                   const std::vector<std::pair<const char *, size_t>> &split2_in)
 {
     if(split_in.size() != split2_in.size()) {
-        std::cerr << "test_for_equality failed -> 1\n";
+        std::cerr << "test_for_equality failed: number of words differs.\n";
         return false;
     }
 
@@ -142,13 +147,13 @@ test_for_equality(const std::vector<std::string> &split_in,
         }
     }
 
-    return error_count != 0;
+    return error_count == 0;
 }
 
 bool split_test_file(const std::string &path)
 {
     std::string file_buffer;
-    wr011_lib::chrono_util::time_me_ns timer;
+    libaan::util::time_me_ns timer;
     read_file(path, file_buffer);
     const double io_time = timer.duration();
     const std::string DELIM = {' '};
@@ -169,7 +174,11 @@ bool split_test_file(const std::string &path)
               << "\tsplit: " << split_time / (1000.0 * 1000.0) << " ms\n"
               << "\tsplit2: " << split2_time / (1000.0 * 1000.0) << " ms\n\n";
 
-    test_for_equality(tokens, tokens2);    
+
+    if(!test_for_equality(tokens, tokens2)) {
+        std::cout << "\nBUGS here.\n\n";
+        return false;
+    }
 
     return true;
 }
