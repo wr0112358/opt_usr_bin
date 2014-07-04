@@ -2,7 +2,7 @@ default:
 	@echo "no target specified."
 
 open_shell:
-	g++ -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -lX11 -lXmu -o open_shell_in_cwd_of
+	g++ -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -lX11 -lXmu -o open_shell_in_cwd_of -I/opt/usr/include
 
 clean:
 	rm -f open_shell_in_cwd_of
