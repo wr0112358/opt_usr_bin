@@ -61,15 +61,13 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <iostream>
 #include <list>
 #include <map>
-#ifdef TOTAL_REGEX_OVERLOAD
-#include <regex>
-#endif
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h> // fork/execv
 #include <vector>
 
-#include "readdir.hh"
+#include "libaan/file_util.hh"
+#include "libaan/string_util.hh"
 
 namespace {
 void _X_NORETURN safe_exit_x11(int code, Display *display,
@@ -167,38 +165,6 @@ inline size_t read_file(const std::string &file_name, std::string &buff)
     fp.read(begin, 4096);
 
     return fp.gcount();
-}
-
-#ifdef TOTAL_REGEX_OVERLOAD
-inline std::vector<std::string> split(const std::string &input,
-                                      const std::regex &regex)
-{
-    // passing -1 as the submatch index parameter performs splitting
-    std::sregex_token_iterator first{input.begin(), input.end(), regex, -1};
-    std::sregex_token_iterator last;
-    return {first, last};
-}
-#endif
-
-// TODO: replace with better tokenizer. see test/
-inline std::vector<std::string> split(const std::string &input,
-                                      const std::string &delim)
-{
-    std::vector<std::string> tokens;
-    std::string::size_type start = 0;
-    std::string::size_type end;
-
-    for(;;) {
-        end = input.find(delim, start);
-        tokens.push_back(input.substr(start, end - start));
-        // We just copied the last token
-        if(end == std::string::npos)
-            break;
-        // Exclude the delimiter in the next search
-        start = end + delim.size();
-    }
-
-    return tokens;
 }
 
 // it is assumed, we have access permissions to path.
@@ -327,23 +293,26 @@ bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
     std::string file_buffer;
     read_file(path, file_buffer);
     const std::string DELIM = {' '};
-    const auto tokens = split(file_buffer, DELIM);
+    const auto tokens = libaan::util::split2(file_buffer, DELIM);
     if(tokens.empty())
         return false;
 
-    content.pid = std::stol(tokens[0]);
-    content.comm.assign(tokens[1]);
-    content.state = tokens[2][0];
-    content.ppid = std::stol(tokens[3]);
-    content.pgrp = std::stol(tokens[4]);
-    content.session = std::stol(tokens[5]);
+    content.pid = std::strtol(tokens[0].first, nullptr, 10);
+    if(content.pid == 0)
+        return false;
+    content.comm.assign(
+        std::string(tokens[1].first, tokens[1].first + tokens[1].second));
+    content.state = tokens[2].first[0];
+    content.ppid = std::strtol(tokens[3].first, nullptr, 10);
+    content.pgrp = std::strtol(tokens[4].first, nullptr, 10);
+    content.session = std::strtol(tokens[5].first, nullptr, 10);
 
     return true;
 }
 
 bool proc_iterate(proc_type &proc_content)
 {
-    auto f = [&proc_content](const std::string &base_path,
+    auto callback = [&proc_content](const std::string &base_path,
                                      const struct dirent *p) {
         const std::string path = base_path + "/" + p->d_name;
         if(isdigit(p->d_name[0])) {
@@ -355,36 +324,9 @@ bool proc_iterate(proc_type &proc_content)
         }
     };
 
-    readdir_cxx::dir::readdir("/proc", f);
+    libaan::util::file::dir::readdir("/proc", callback);
     return true;
 }
-
-/* parsing proc pid environ to get pwd was a deadend
-// returns empty string on failure
-std::string get_pwd_of(pid_t pid)
-{
-    const std::string path = "/proc/" + std::to_string(pid) + "/environ";
-    std::string file_buffer;
-    const auto size = read_file(path, file_buffer);
-    std::cout << "read " << size << "bytes from " << path << "\n";
-
-#ifdef TOTAL_REGEX_OVERLOAD
-    const auto tokens = split(file_buffer, std::regex(R"(('.'|'\\0'))"));
-#endif
-    const std::string DELIM = {'\0'};
-    const auto tokens = split(file_buffer, DELIM);
-
-    for(const auto & token: tokens) {
-        const std::string PREFIX = "PWD=";
-        if(string_starts_with(token, PREFIX)) {
-            std::cout << "PWD-token = \"" << token << "\"\n";
-            return token.substr(PREFIX.length(), token.length());
-        }
-    }
-    return std::string();
-}
-*/
-
 }
 
 int main(int argc, char *argv[])
