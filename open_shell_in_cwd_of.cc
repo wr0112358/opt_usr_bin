@@ -28,11 +28,18 @@ add keybinding under lxde:
   ...
   <keybind key="C-1">
       <action name="Execute">
-          <command>/opt/usr/bin/open_shell_in_cwd_of</command>
+          <command>/opt/usr/bin/open_shell_in_cwd_of --child-id --urxvt256c</command>
       </action>
   </keybind>
   ...
   $ openbox-lxde --reconfigure
+
+add keybinding under awesome wm:
+    awful.key({ ctrlkey, }, "1", function () awful.util.spawn("/opt/usr/bin/open_shell_in_cwd_of --child-id --urxvt256c") end),
+
+For gnome-terminal, a different window identification mode must be used.
+Keyboard shortcut can be set in gnome-control-center.
+./open_shell_in_cwd_of --wm_name-id --gnome_terminal
 
 What this program does:
 1. change mouse cursor(like xkill does)
@@ -42,6 +49,11 @@ What this program does:
 5. open shell at mousepos with cwd set to $pids cwd
 
 # TODO
+- it does not work for gui windows, only for shells.
+- sometimes even shells won't work. needs some debugging
+- root shells not working. wanted behaviour would be: click on root shell,
+  try getting a hint on cwd. pstree can find out parent pids. iterate through
+  parents, until looking at cwd is possible and use this dir.
 - see TODOs in code
 - move all non app-specific functions to lib
 - instead of mouse-click better wait for user-defined key(maybe <space>) and
@@ -57,11 +69,15 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <X11/Xmu/WinUtil.h>
 #include <X11/cursorfont.h> //XC_pirate
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <list>
 #include <map>
+#include <stack>
 #include <string>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h> // fork/execv
 #include <vector>
@@ -152,7 +168,7 @@ unsigned long get_pid(Display *display, Window window)
 
     pid = *((unsigned long *)prop);
     XFree(prop);
-    std::cout << "Found pid " << pid << "\n";
+    std::cout << "Found pid " << pid << " corresponding to window " << window << "\n";
 
     return pid;
 }
@@ -260,6 +276,18 @@ public:
     }
 };
 
+std::string sstrerror(int last_errno)
+{
+    std::string buf(128, 0);
+    auto ret = strerror_r(last_errno, &buf[0], buf.size());
+    if(!ret)
+        return "unknown error.";
+    if(ret != &buf[0])
+        buf.assign(ret);
+
+    return buf;
+}
+
 // TODO: if user clicks on shell running a root shell. readlink will fail on
 //       the returned pid.
 //       Provide switch to turn on access rights check.
@@ -272,8 +300,10 @@ pid_t get_last_child_pid_before_branch(const proc_type &proc_content,
     const child_processes c(proc_content);
     const child_processes &child_searcher = c;
     auto pid_of_interest = ppid;
+    std::stack<pid_t> ancestors;
     do {
-        const auto &child_list = child_searcher.get(pid_of_interest);
+        ancestors.push(pid_of_interest);
+        const auto child_list = child_searcher.get(pid_of_interest);
 
         {
             std::cout << pid_of_interest << ":";
@@ -283,9 +313,24 @@ pid_t get_last_child_pid_before_branch(const proc_type &proc_content,
         }
 
         if(child_list.size() != 1)
-            return pid_of_interest;
+            break;
         pid_of_interest = child_list.back();
     } while(true);
+
+    // iterate back over all ancestors to find first acccessible.
+    do {
+        pid_of_interest = ancestors.top();
+        struct stat s;
+        if(::stat(std::string("/proc/" + std::to_string(pid_of_interest) + "/cwd").c_str(), &s) == 0) {
+            std::cout << "stating cwd of " << pid_of_interest << " suceeded.\n";
+            break;
+        } else {
+            auto last_errno = errno;
+            std::cout << "stating cwd of " << pid_of_interest << " failed with error: " << sstrerror(last_errno) << "\n";
+        }
+        ancestors.pop();
+    } while(true);
+    return pid_of_interest;
 }
 
 bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
@@ -327,10 +372,174 @@ bool proc_iterate(proc_type &proc_content)
     libaan::util::file::dir::readdir("/proc", callback);
     return true;
 }
+
+void usage(const char *argv0)
+{
+    std::cout << "Usage: " << argv0 << " <window-identification-mode> <optional-shell-type>\n"
+              << "\twindow-identification-mode: one of --wm_name-id | --child-id\n"
+              << "\toptional-shell-type: one of --urxvt256c | --gnome_terminal\n";
+}
+
+enum shelltype {
+    URXVT256C, GNOME_TERMINAL
+};
+
+std::string get_gnome_wm_name_path(Display *display, XID window_id)
+{
+    Atom name_atom = XInternAtom(display, "WM_NAME", True);
+    if(name_atom == None) {
+        std::cerr << "WM_NAME Atom not found.\n";
+        return "";
+    }
+
+    Atom string_atom = XInternAtom(display, "STRING", True);
+    if(name_atom == None) {
+        std::cerr << "STRING Atom not found.\n";
+        return "";
+    }
+
+    Atom type;
+    int format;
+    unsigned long items_count;
+    unsigned long bytes_after;
+    unsigned char *prop = 0;
+    const long long_length = 1024;
+    if((XGetWindowProperty(display, window_id, name_atom, 0, long_length, False, string_atom,
+                           &type, &format, &items_count, &bytes_after, &prop)
+        != Success) || !prop)
+        return "";
+
+    // https://people.gnome.org/~tthurman/bugs/same.c
+    auto size = (format / 8) * items_count;
+    if(format == 32)
+        size *= sizeof(long) / 4;
+
+    std::cout << "XGetWindowProperty -> prop = \"" << prop << "\", items_count = " << items_count
+              << ", bytes_after = " << bytes_after << ", size = " << size << "\n";
+
+    char *prop_c = reinterpret_cast<char *>(prop);
+    auto tmp = std::strstr(prop_c, ":");
+    if(!tmp || (tmp + 1) == '\0')
+        return "";
+    const std::string ret(tmp + 1);
+    XFree(prop);
+    std::cout << "Found path " << ret << " corresponding to window " << window_id << "\n";
+    return ret;
+}
+
+bool open_shell_in(const std::string &pwd, shelltype shell)
+{
+    if(shell == URXVT256C) {
+/* Working for rxvt terminals: */
+        std::array<std::string, 11> cpp_args(
+            {{"/bin/urxvt256c",
+                        "-bg", "black",
+                        "-fg", "white",
+                        "-cr", "white",
+                        "-e", "/bin/bash",
+                        "-c",
+                        "cd " + pwd + " && /bin/bash"}});
+        char * const args[] = {
+            const_cast<char *const>(cpp_args[0].c_str()),
+            const_cast<char *const>(cpp_args[1].c_str()),
+            const_cast<char *const>(cpp_args[2].c_str()),
+            const_cast<char *const>(cpp_args[3].c_str()),
+            const_cast<char *const>(cpp_args[4].c_str()),
+            const_cast<char *const>(cpp_args[5].c_str()),
+            const_cast<char *const>(cpp_args[6].c_str()),
+            const_cast<char *const>(cpp_args[7].c_str()),
+            const_cast<char *const>(cpp_args[8].c_str()),
+            const_cast<char *const>(cpp_args[9].c_str()),
+            const_cast<char *const>(cpp_args[10].c_str()),
+            NULL
+        };
+
+        const pid_t fork_pid = fork();
+        if(fork_pid == -1) {
+            perror("fork error");
+            return false;
+        } else if(fork_pid == 0) {
+            if(execv("/bin/urxvt256c", args)) {
+                perror("execv");
+                return false;
+            }
+        }
+    } else if(shell == GNOME_TERMINAL) {
+        std::array<std::string, 3> cpp_args(
+            {{"/usr/bin/gnome-terminal",
+                        "-e",
+                        "/bin/bash -c 'cd " + pwd + " && /bin/bash'"}});
+        char * const args[] = {
+            const_cast<char *const>(cpp_args[0].c_str()),
+            const_cast<char *const>(cpp_args[1].c_str()),
+            const_cast<char *const>(cpp_args[2].c_str()),
+            NULL
+        };
+
+        const pid_t fork_pid = fork();
+        if(fork_pid == -1) {
+            perror("fork error");
+            return false;
+        } else if(fork_pid == 0) {
+            if(execv("/usr/bin/gnome-terminal", args)) {
+                perror("execv");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 }
 
 int main(int argc, char *argv[])
 {
+    if(argc != 2 && argc != 3) {
+        usage(argv[0]);
+        return -1;
+    }
+
+/* old child-id mode does not work for gnome-terminal since there is only one
+   instance of it around. but gnome-terminal sets WM_NAME to:
+   WM_NAME(STRING) = "user@host:/path/of/interest"
+
+
+|-gnome-terminal-(13118)-+-bash(13122)
+ |                        |-bash(16984)---emacs(25908)---{gmain}(25909)
+ |                        |-bash(26022)---emacs(27684)---{gmain}(27685)
+ |                        |-bash(27703)-+-less(30159)
+ |                        |             `-pstree(30158)
+ |                        |-gnome-pty-helpe(13121)
+ |                        |-{dconf worker}(13120)
+ |                        |-{gdbus}(13119)
+ |                        `-{gmain}(13123)
+*/
+    enum window_id_mode {
+        WM_NAME_ID, CHILD_ID
+    } wid_mode;
+    const std::string a1(argv[1]);
+    if(a1 == "--wm_name-id") {
+        wid_mode = WM_NAME_ID;
+    } else if(a1 == "--child-id") {
+        wid_mode = CHILD_ID;
+    } else {
+        usage(argv[0]);
+        return -1;
+    }
+
+    shelltype shell = GNOME_TERMINAL;
+    if(argc ==3) {
+        const std::string a2(argv[2]);
+        if(a2 == "--urxvt256c") {
+            shell = URXVT256C;
+        } else if(a2 == "--gnome_terminal") {
+            shell = GNOME_TERMINAL;
+        } else{
+            usage(argv[0]);
+            return -1;
+        }
+    }
+
     Display *display = XOpenDisplay(nullptr);
     if(!display)
         safe_exit_x11(1, display, std::string("unable to open display \"")
@@ -365,7 +574,22 @@ int main(int argc, char *argv[])
     if((id = XmuClientWindow(display, indicated)) == indicated)
         safe_exit_x11(1, display, "Wrong selection.");
 
+    // gnome-terminal makes it easy for us:
+    if(wid_mode == WM_NAME_ID) {
+        const auto pwd = get_gnome_wm_name_path(display, id);
+        if(pwd.empty())
+            safe_exit_x11(1, display, "get_gnome_wm_name_path failed");
+        if(!open_shell_in(pwd, shell))
+            safe_exit_x11(1, display,
+                          std::string("open_shell_in(" + pwd
+                                      + "GNOME_TERMINAL) failed").c_str());
+        safe_exit_x11(0, display);
+    }
+
+    // CHILD_ID mode starting here.
+    // the pid of the containing window
     const auto window_pid = get_pid(display, id);
+
     proc_type proc_content;
     proc_iterate(proc_content);
     const child_processes children(proc_content);
@@ -394,25 +618,10 @@ int main(int argc, char *argv[])
               << "\n\tdirectory: " << pwd << "\n";
 
 
-    std::array<std::string, 6> cpp_args(
-        {{"/bin/urxvt256c", "-e", "/bin/bash", "-c",
-          "cd " + pwd + " && /bin/bash"}});
-    char * const args[] = {
-        const_cast<char *const>(cpp_args[0].c_str()),
-        const_cast<char *const>(cpp_args[1].c_str()),
-        const_cast<char *const>(cpp_args[2].c_str()),
-        const_cast<char *const>(cpp_args[3].c_str()),
-        const_cast<char *const>(cpp_args[4].c_str()),
-        NULL
-    };
-
-    const pid_t fork_pid = fork();
-    if(fork_pid == -1)
-        perror("fork error");
-    else if(fork_pid == 0)
-        if(execv("/bin/urxvt256c", args))
-            perror("execv");
-
+    if(!open_shell_in(pwd, shell))
+        safe_exit_x11(1, display,
+                      std::string("open_shell_in(" + pwd
+                                  + "URXVT256C) failed").c_str());
     safe_exit_x11(0, display);
     return 0;
 }

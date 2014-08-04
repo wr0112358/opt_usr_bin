@@ -14,6 +14,18 @@ source ~/.user_globals
 # - only works now if all LUKS targets use the same key
 # - show mapping <real device, luks name>
 
+function list_c
+{
+   local names_count=${#USER_GLOBALS_LUKS_NAMES[@]}
+
+    for (( i = 0 ; i < $names_count ; i++ )); do
+	printf "${USER_GLOBALS_LUKS_NAMES[$i]}, ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]}, ${USER_GLOBALS_LUKS_PARTITIONS[$i]}\n"
+# only possible as root:
+#, $(cryptsetup status ${USER_GLOBALS_LUKS_NAMES[$i]} | head -n 1)"
+    done
+
+}
+
 function open_c
 {
     local open_command=""
@@ -31,7 +43,7 @@ function open_c
 	open_command=$open_command" echo $KEY | cryptsetup luksOpen ${USER_GLOBALS_LUKS_PARTITIONS[$i]} ${USER_GLOBALS_LUKS_NAMES[$i]};"
     done
 
-    echo "running command: $open_command"
+#    echo "running command: $open_command"
     su --command="$open_command"
 
     KEY=""
@@ -46,7 +58,7 @@ function close_c
 	close_command=$close_command" cryptsetup luksClose ${USER_GLOBALS_LUKS_NAMES[$i]};"
     done
 
-    echo "running command: $close_command"
+#    echo "running command: $close_command"
     su --command="$close_command"
 }
 
@@ -60,7 +72,7 @@ function mount_c
 	mount_command=$mount_command" mount /dev/mapper/${USER_GLOBALS_LUKS_NAMES[$i]} ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]};"
     done
 
-    echo "running command: $mount_command"
+#    echo "running command: $mount_command"
     su --command="$mount_command"
 }
 
@@ -74,7 +86,7 @@ function umount_c
 	umount_command=$umount_command" umount ${USER_GLOBALS_LUKS_PARTITIONS_MOUNT_PATH[$i]};"
     done
 
-    echo "running command: $umount_command"
+#    echo "running command: $umount_command"
     su --command="$umount_command"
 }
 
@@ -128,6 +140,9 @@ case $1 in
 	;;
     s*)
 	is_mounted
+	;;
+    l*)
+	list_c
 	;;
     *)
 	usage
