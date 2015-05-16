@@ -15,6 +15,7 @@ install: all
 	cp png2pdf.sh /opt/usr/bin
 	cp resize_win_at.sh /opt/usr/bin
 	cp send_ip_on_change /opt/usr/bin
+	cp ip_external.sh /opt/usr/bin
 
 test:
 	make -C test/ test
