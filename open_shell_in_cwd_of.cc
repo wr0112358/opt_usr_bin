@@ -82,11 +82,11 @@ Code based on xkill.c and xprop (xprop _NET_WM_PID | cut -d' ' -f3)
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <unistd.h> // fork/execv
+#include <unistd.h>
 #include <vector>
 
-#include "libaan/file_util.hh"
-#include "libaan/string_util.hh"
+#include "libaan/file.hh"
+#include "libaan/string.hh"
 
 namespace {
 void _X_NORETURN safe_exit_x11(int code, Display *display,
@@ -166,10 +166,17 @@ unsigned long get_pid(Display *display, Window window)
     unsigned long bytes_after;
     unsigned char *prop = 0;
     unsigned long pid = 0;
-    if((XGetWindowProperty(display, window, pid_atom, 0, 1, False, XA_CARDINAL,
-                           &type, &format, &items_count, &bytes_after, &prop)
-        != Success) || !prop)
+    const auto ret = XGetWindowProperty(display, window, pid_atom, 0, 1, False, XA_CARDINAL,
+                                        &type, &format, &items_count, &bytes_after, &prop);
+    if(ret != Success){
+        std::cerr << "XGetWindowProperty failed 1: return = " << ret << ", prop = " << (long)prop << "\n";
+        if(prop)
+            XFree(prop);
         return 0;
+    } else if(!prop) {
+        std::cerr << "XGetWindowProperty failed 2: return = " << ret << ", prop = " << (long)prop << "\n";
+        return 0;
+    }
 
     pid = *((unsigned long *)prop);
     XFree(prop);
@@ -343,19 +350,22 @@ bool proc_pid_stat(const std::string &path, proc_pid_stat_type &content)
     std::string file_buffer;
     read_file(path, file_buffer);
     const std::string DELIM = {' '};
-    const auto tokens = libaan::util::split2(file_buffer, DELIM);
+    const auto tokens = libaan::split(file_buffer, DELIM);
     if(tokens.empty())
         return false;
 
-    content.pid = std::strtol(tokens[0].first, nullptr, 10);
+    content.pid = std::strtol(tokens[0].data(), nullptr, 10);
     if(content.pid == 0)
         return false;
     content.comm.assign(
-        std::string(tokens[1].first, tokens[1].first + tokens[1].second));
-    content.state = tokens[2].first[0];
-    content.ppid = std::strtol(tokens[3].first, nullptr, 10);
-    content.pgrp = std::strtol(tokens[4].first, nullptr, 10);
-    content.session = std::strtol(tokens[5].first, nullptr, 10);
+        std::string(tokens[1].data(), tokens[1].data() + tokens[1].length()));
+    content.state = tokens[2].data()[0];
+    content.ppid = std::strtol(tokens[3].data(), nullptr, 10);
+    content.pgrp = std::strtol(tokens[4].data(), nullptr, 10);
+    content.session = std::strtol(tokens[5].data(), nullptr, 10);
+
+//    std::cout << "\"" << path << "\": " << content.pid << "/" << content.ppid << "\n";
+
 
     return true;
 }
@@ -374,7 +384,7 @@ bool proc_iterate(proc_type &proc_content)
         }
     };
 
-    libaan::util::file::dir::readdir("/proc", callback);
+    libaan::readdir("/proc", callback);
     return true;
 }
 
@@ -638,6 +648,8 @@ int main(int argc, char *argv[])
     // CHILD_ID mode starting here.
     // the pid of the containing window
     const auto window_pid = get_pid(display, id);
+    if(window_pid == 0)
+        safe_exit_x11(1, display, "get_pid failed for containg window\n");
 
     proc_type proc_content;
     proc_iterate(proc_content);

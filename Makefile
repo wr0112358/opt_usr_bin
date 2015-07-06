@@ -2,7 +2,7 @@ default:
 	@echo "no target specified."
 
 open_shell:
-	g++ -g -O0 -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -lX11 -lXmu -o open_shell_in_cwd_of -I/opt/usr/include
+	g++ -g -O0 -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -o open_shell_in_cwd_of $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
 
 clean:
 	rm -f open_shell_in_cwd_of
