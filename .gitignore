@@ -3,3 +3,4 @@ a.out
 open_shell_in_cwd_of
 test/tokenizer_test
 watch_procs
+spidof

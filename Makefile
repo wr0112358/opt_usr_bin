@@ -1,18 +1,22 @@
 default:
 	@echo "no target specified."
 
+spidof:
+	g++ -Wall -O3 -std=c++1y spidof.cc -o spidof $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
+
 open_shell:
 	g++ -g -O0 -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -o open_shell_in_cwd_of $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
 
 clean:
-	rm -f open_shell_in_cwd_of
+	rm -f open_shell_in_cwd_of spidof
 
-all: open_shell
+all: open_shell spidof
 
 install: all
 	mkdir -p /opt/usr/bin
 	cp crypto_mount /opt/usr/bin
 	cp open_shell_in_cwd_of /opt/usr/bin
+	cp spidof /opt/usr/bin
 	cp png2pdf.sh /opt/usr/bin
 	cp resize_win_at.sh /opt/usr/bin
 	cp send_ip_on_change /opt/usr/bin
