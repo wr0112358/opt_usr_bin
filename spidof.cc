@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     auto const f = [&name](const std::string &path, const struct dirent *p) {
         const auto pid = std::atoi(p->d_name);
         if(pid == 0)
-            return;
+            return true;
         std::string buff;
         buff.resize(libaan::read_file((path + p->d_name + "/cmdline").c_str(), buff, 512));
         //std::cout << (path + p->d_name + "/cmdline") << " -> " << buff.length() << "\n";
@@ -35,12 +35,13 @@ int main(int argc, char *argv[])
         // oneshot
         if(std::strncmp(name.c_str(), base, name.length()) == 0) {
             std::cout << pid << "\n" << std::flush;
-            exit(0);
+            return false;
         }
+        return true;
     };
 
     for(size_t i = 0; i < 50; i++) {
-        libaan::readdir("/proc/", f);
+        libaan::readdir2("/proc/", f);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::cerr << "." << std::flush;
     }
