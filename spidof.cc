@@ -10,7 +10,7 @@ htop -p $(/opt/usr/bin/spidof h264dec)
 Problems:
  - must iterate over procfs again and again.
    possible workarounds:
-     + "proc connector" polling api is perfect for the job, but needs root capabilities.
+     + "proc connector" polling api is perfect for the job, but needs root(CAP_NET_ADMIN).
      + inotify on /lib64/ld-2.21.so could reduce interval of busy wait and amount of folders to read?
 
 */
