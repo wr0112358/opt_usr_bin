@@ -5,3 +5,4 @@ test/tokenizer_test
 watch_procs
 spidof
 hex_search
+color_regex

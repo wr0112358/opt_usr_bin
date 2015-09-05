@@ -3,18 +3,20 @@ default:
 
 CXXFLAGS = -Wall -Werror -O3 -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
 
-spidof: spidof.cc
+color_regex: color_regex.cc
 hex_search: hex_search.cc
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
+spidof: spidof.cc
 
 clean:
 	rm -f open_shell_in_cwd_of spidof hex_search *.o
 
-all: open_shell_in_cwd_of spidof hex_search
+all: color_regex hex_search open_shell_in_cwd_of spidof
 
 install: all
 	mkdir -p /opt/usr/bin
 	cp crypto_mount /opt/usr/bin
+	cp color_regex /opt/usr/bin
 	cp open_shell_in_cwd_of /opt/usr/bin
 	cp hex_search /opt/usr/bin
 	cp spidof /opt/usr/bin
