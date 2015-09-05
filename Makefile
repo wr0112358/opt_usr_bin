@@ -1,16 +1,18 @@
 default:
 	@echo "no target specified."
 
-spidof:
-	g++ -Wall -O3 -std=c++1y spidof.cc -o spidof $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
+CXXFLAGS = -Wall -Werror -O3 -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
 
-open_shell:
-	g++ -g -O0 -std=c++0x -Wall -Werror open_shell_in_cwd_of.cc -o open_shell_in_cwd_of $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
+spidof: spidof.cc
+
+hex_search: hex_search.cc
+
+open_shell: open_shell_in_cwd_of.cc
 
 clean:
-	rm -f open_shell_in_cwd_of spidof
+	rm -f open_shell spidof hex_search *.o
 
-all: open_shell spidof
+all: open_shell spidof hex_search
 
 install: all
 	mkdir -p /opt/usr/bin
