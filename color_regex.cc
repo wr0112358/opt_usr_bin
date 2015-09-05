@@ -7,7 +7,9 @@ ls | ./color_regex .
 echo "/bin/ls abc" | cr
 sudo tail -f /var/log/messages | ./color_regex --regex 'Sep  5 [[:digit:]]7:' --color cyan
 
-//std::regex("meow", std::regex::grep)
+echo "abc" | ./color_regex a
+echo "abc" | ./color_regex a --whole_line
+
 */
 
 #include <cstring>
@@ -71,22 +73,20 @@ inline std::string colorize_if(std::string &&line, const std::regex &reg,
 {
     std::smatch match;
     std::regex_search(line, match, reg);
-    for(auto m: match)
-        std::cout << "\"" << m << "\"\n";
+    // for(auto m: match) std::cout << "\"" << m << "\"\n";
 
     if(!match.empty()) {
         if(opts.whole_line)
             return common::colorize(opts.color, std::move(line));
 
         for(auto m: match)
-            replaceAll(line, m, common::colorize(opts.color, m));
+            replace(line, m, common::colorize(opts.color, m));
     }
     return line;
 }
 
 bool run(const opt_t &opts)
 {
-    std::cout << "reg: \"" << opts.regex << "\"\n";
     std::regex reg(opts.regex, std::regex_constants::egrep);
     std::string line;
     while(std::getline(std::cin, line))
