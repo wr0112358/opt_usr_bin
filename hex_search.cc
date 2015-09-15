@@ -37,6 +37,7 @@ $ hex_search video.h264 000001 -A 1 -B 1
 #include <libaan/fd.hh>
 #include <libaan/string.hh>
 
+namespace {
 template<typename lambda_t>
 bool foreach_blob(const char *filename, size_t blobsize, lambda_t lambda)
 {
@@ -46,13 +47,14 @@ bool foreach_blob(const char *filename, size_t blobsize, lambda_t lambda)
         return false;
     }
 
-    std::vector<char> buf(4096, 0);
+    std::vector<char> buf(blobsize, 0);
     int ret;
     do {
         ret = libaan::readall(fd, &buf[0], buf.size());
         if(!lambda(buf, ret))
             break;
     } while(ret > 0);
+    close(fd);
 
     return true;
 }
@@ -69,7 +71,7 @@ bool printx_at(int fd, size_t off, size_t len)
     std::vector<unsigned char> buf(len, 0);
     const auto r = pread(fd, &buf[0], buf.size(), off);
     if(r == -1) {
-        perror("open");
+        perror("pread");
         return false;
     }
 
@@ -90,13 +92,10 @@ bool print(const std::vector<size_t> &found,
            const size_t before, const size_t after,
            const char *filename)
 {
-    int fd = -1;
-    if(before || after) {
-        fd = open(filename, O_RDONLY, NULL);
-        if(fd == -1) {
-            perror("open");
-            return false;
-        }
+    int fd = open(filename, O_RDONLY, NULL);
+    if(fd == -1) {
+        perror("open");
+        return false;
     }
 
     for(const auto off: found) {
@@ -109,7 +108,11 @@ bool print(const std::vector<size_t> &found,
         printx_at(fd, o16, after == 0 ? 16 : (after * 16 + 16));
         std::cout << "\n";
     }
+
+    close(fd);
     return 0;
+}
+
 }
 
 int main(int argc, char *argv[])

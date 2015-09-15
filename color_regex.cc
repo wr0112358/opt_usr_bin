@@ -16,7 +16,6 @@ echo "abc" | ./color_regex a --whole_line
 #include <iostream>
 #include <regex>
 #include <string>
-//#include <tuple>
 
 #include "../fragments/include_common/term_color.hh"
 
