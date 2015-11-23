@@ -165,7 +165,7 @@ int main(int argc, char *argv[])
                         [&bin_pattern, &total_off, &found]
                         (const std::vector<char> &buf, size_t fill) {
                             // return true to continue, false to break
-                            const auto x = memmem(&buf [0], fill,
+                            const auto x = memmem(&buf[0], fill,
                                                   &bin_pattern.second[0],
                                                   bin_pattern.second.size());
                             if(x == NULL) {

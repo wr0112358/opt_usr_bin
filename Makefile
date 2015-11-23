@@ -2,6 +2,7 @@ default:
 	@echo "no target specified."
 
 CXXFLAGS = -Wall -Werror -O3 -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
+#CXXFLAGS = -Wall -Werror -O0 -DTEST -g -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
 
 color_regex: color_regex.cc
 hex_search: hex_search.cc
@@ -9,9 +10,9 @@ open_shell_in_cwd_of: open_shell_in_cwd_of.cc
 spidof: spidof.cc
 
 clean:
-	rm -f open_shell_in_cwd_of spidof hex_search *.o
+	rm -f h264_sprop_parameter_sets open_shell_in_cwd_of spidof hex_search *.o
 
-all: color_regex hex_search open_shell_in_cwd_of spidof
+all: color_regex hex_search open_shell_in_cwd_of spidof h264_sprop_parameter_sets
 
 install: all
 	mkdir -p /opt/usr/bin
