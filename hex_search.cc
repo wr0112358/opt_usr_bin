@@ -27,6 +27,7 @@ $ hex_search video.h264 000001 -A 1 -B 1
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -54,6 +55,7 @@ bool foreach_blob(const char *filename, size_t blobsize, lambda_t lambda)
         if(!lambda(buf, ret))
             break;
     } while(ret > 0);
+
     close(fd);
 
     return true;
@@ -113,6 +115,31 @@ bool print(const std::vector<size_t> &found,
     return 0;
 }
 
+bool ends_with(const void *haystack, size_t haystack_len,
+               const void *needle, size_t needle_len)
+{
+    return haystack_len >= needle_len
+        && memcmp((char *)haystack + haystack_len - needle_len, needle, needle_len) == 0;
+}
+
+// returns 0 if haystack contains the complete needle
+// returns 1 if haystack contains the complete needle - 1
+// returns 2 if haystack contains the complete needle - 2
+// ...
+// returns needle_len if needle is not found
+size_t ends_with_prefix(const void *haystack, size_t haystack_len,
+                        const void *needle, size_t needle_len)
+{
+    for(size_t i = 0; i < needle_len; i++) {
+        //std::cout << "prefix: " << std::string((char *)needle, needle_len - i) << "\n";
+        //std::cout << "hay: " << std::string((char *)haystack, haystack_len) << "\n";
+        if(ends_with(haystack, haystack_len,
+                     needle, needle_len - i))
+            return i;
+    }
+    return needle_len;
+}
+
 }
 
 int main(int argc, char *argv[])
@@ -156,31 +183,55 @@ int main(int argc, char *argv[])
     if(!bin_pattern.first)
         return -1;
 
-    //for(auto x: bin_pattern.second) std::cout << (int)x << " "; std::cout << "\n";
-
     size_t total_off = 0;
 
     std::vector<size_t> found;
-    if(!foreach_blob(argv[1], 4096,
-                        [&bin_pattern, &total_off, &found]
-                        (const std::vector<char> &buf, size_t fill) {
-                            // return true to continue, false to break
-                            const auto x = memmem(&buf[0], fill,
-                                                  &bin_pattern.second[0],
-                                                  bin_pattern.second.size());
-                            if(x == NULL) {
-                                total_off += fill;
-                                return true;
-                            }
+    std::vector<char> old;
+    if(!foreach_blob
+       (argv[1], 1024,
+        [&bin_pattern, &total_off, &found, &old]
+        (const std::vector<char> &buf, size_t fill) {
+           const char *data = buf.data();
+           size_t size = fill;
+           if(!old.empty()) {
+               old.insert(std::end(old), std::begin(buf), std::end(buf));
+               data = old.data();
+               size = old.size();
+           }
 
-                            assert(x > &buf[0]);
+           size_t off = 0;
+           while(true) {
+               const auto x = memmem(data + off, size - off,
+                                     &bin_pattern.second[0],
+                                     bin_pattern.second.size());
+               if(x == NULL)
+                   break;
 
-                            const size_t off = (uintptr_t)x - (uintptr_t)&buf[0];
-                            assert(off <= fill);
-                            found.push_back(total_off + off);
-                            total_off += fill;
-                            return true;
-                     }))
+               assert(x >= (data + off));
+               off = (uintptr_t)x - (uintptr_t)data;
+               assert(off <= size);
+
+               found.push_back(total_off + off);
+               off += bin_pattern.second.size();
+               if(size == off)
+                   break;
+           }
+           old.clear();
+
+           total_off += size;
+           // prefix of searched pattern at end of blob? keep it.
+           if(ends_with_prefix(data, size,
+                               bin_pattern.second.data(),
+                               bin_pattern.second.size())
+              != bin_pattern.second.size()) {
+               assert(old.empty());
+               old.insert(std::begin(old), buf.data() + size
+                          - bin_pattern.second.size(),
+                          buf.data() + size);
+               total_off -= bin_pattern.second.size();
+           }
+           return true;
+       }))
         return -1;
 
     return print(found, print_before, print_after, argv[1]) ? 0 : -1;

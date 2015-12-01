@@ -21,8 +21,14 @@ pps "68 ce 4 62 "
 #include <sys/stat.h>
 #include <fcntl.h>
 
+extern "C" {
+#include <gst/codecparsers/gsth264parser.h>
+}
+
 #include <algorithm>
 #include <cassert>
+#include <cstring>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -31,13 +37,17 @@ pps "68 ce 4 62 "
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
 
-#include <libaan/fd.hh>
 #include <libaan/string.hh>
 
+//#define TEST
 #ifdef TEST
 const std::vector<std::string> sprops_ex = {
     "Z0IAKeNQFAe2AtwEBAaQeJEV,aM48gA==",
-    "sprop-parameter-sets=Z2QAFKzZQ0R+f/zBfMMAQAAAAwBAAAAKI8UKZYA=,aOvssiw=;"
+    "sprop-parameter-sets=Z2QAFKzZQ0R+f/zBfMMAQAAAAwBAAAAKI8UKZYA=,aOvssiw=;",
+    "Z0KAHoxoEBM/8AAQABAI,aM4EYg==",
+    "sprop-parameter-sets=Z0KAHoxoEBM/8AAQABAI,aM4EYg==",
+    "Z2QAH6zZQFAFuwEQAAADABAAAAMDIPGDGWA=,aOvjyyLA",
+    "sprop-parameter-sets=Z2QAH6zZQFAFuwEQAAADABAAAAMDIPGDGWA=,aOvjyyLA"
 };
 #endif
 
@@ -115,11 +125,11 @@ bool decode_sprops(const std::string &sprops)
 void dumpv(const unsigned char *vec, size_t size, size_t max)
 {
     const auto lim = max ? std::min(max, size) : size;
-    for(size_t i = 0; i < lim; i++)
-        if(i && i % 20 == 0)
+    for(size_t i = 0; i < lim; i++) {
+        if(i && i % 24 == 0)
             puts("");
-        else
-            printf("%02x ", (unsigned int)*(unsigned char *)&vec[i]);
+        printf("%02x ", (unsigned int)*(unsigned char *)&vec[i]);
+    }
     puts("");
 }
 
@@ -131,11 +141,6 @@ void dumpv(const std::vector<unsigned char> &vec, size_t max = 0)
 bool encode_sprops(const std::vector<unsigned char> &sps,
                    const std::vector<unsigned char> &pps)
 {
-    std::cout << "SPS: ";
-    dumpv(sps);
-    std::cout << "PPS: ";
-    dumpv(pps);
-
     std::string sps64(124, '\0');
     sps64.resize(base64encode(reinterpret_cast<const char *>(&sps[0]), sps.size(),
                               &sps64[0], sps64.size()));
@@ -143,130 +148,108 @@ bool encode_sprops(const std::vector<unsigned char> &sps,
     pps64.resize(base64encode(reinterpret_cast<const char *>(&pps[0]), pps.size(),
                               &pps64[0], pps64.size()));
                               
-    std::cout << "sprop-parameter-sets=" << sps64 << "," << pps64 << "\n";
+    printf("sprop-parameter-sets=%s,%s\n", sps64.c_str(), pps64.c_str());
 
     return true;
 }
 
-template<typename lambda_t>
-void for_each_nalu(const char *file, lambda_t lambda)
+template<size_t blobsize, typename lambda_t>
+void foreach_blob(const char *filename, lambda_t lambda)
 {
-    int fd = open(file, O_RDONLY, NULL);
-    if(fd == -1) {
-        perror("open");
-        return;
-    }
-
-    std::vector<char> buf(8192, 0);
-    std::vector<char> old(8192, 0);
-    size_t old_off = 0;
-   size_t old_size = 0;
-
-    int ret;
-    size_t total = 0;
-    bool exit = false;
+    std::ifstream fp(filename, std::ios::binary);
+    std::vector<unsigned char> buf(blobsize, 0);
+    size_t fill = 0;
+    size_t total_off = 0;
     do {
-        ret = libaan::readall(fd, &buf[0], buf.size());
-        if(ret <= 0) {
-            if(old_off)
-                if(!lambda(reinterpret_cast<unsigned char *>(&old[old_off]), old_size - old_off)) {
-                    exit = true;
+        fp.read(reinterpret_cast<char *>(buf.data() + fill), buf.size() - fill);
+        fill += fp.gcount();
+        if(!fill)
+            return;
+        const auto ret = lambda(buf.data(), fill, total_off);
+        if(!ret.first)
+            break;
+
+        assert(fill >= ret.second);
+        assert(!ret.first ? ret.second != 0 : true);
+        if(ret.first && ret.second == 0)
+            printf("No NALUs found in buffer of size %zu. incresing buffer might help\n", blobsize);
+
+        fill -= ret.second;
+        if(fill)
+            std::rotate(std::begin(buf), std::begin(buf) + ret.second, std::end(buf));
+        total_off += ret.second;
+    } while(!fp.eof());
+}
+
+bool do_blockwise(const char *file)
+{
+    auto parser = gst_h264_nal_parser_new();
+    size_t count = 0;
+    size_t last_sps = 0;
+    bool have = false;
+    std::vector<unsigned char> sps;
+    std::vector<unsigned char> pps;
+    // buffer size must be larger than largest NALU
+    foreach_blob<32768 * 6>
+        (file, [&parser, &count, &sps, &pps, &last_sps, &have]
+         (const unsigned char *data, size_t len, size_t total_off) {
+            size_t off = 0;
+            do {
+                GstH264NalUnit nalu;
+                const auto result = gst_h264_parser_identify_nalu(parser, data, off, len, &nalu);
+                if(result == GST_H264_PARSER_NO_NAL_END)
+                    break;
+                if(result != GST_H264_PARSER_OK)
+                    return std::make_pair(false, 0lu);
+
+                ++count;
+                assert(nalu.offset >= nalu.sc_offset);
+                assert(len > (nalu.offset + nalu.size));
+                //const auto sc_size = nalu.offset - nalu.sc_offset;
+                switch(nalu.type) {
+                case GST_H264_NAL_SPS:
+                    if(!sps.empty()) {
+                        puts("no pps between sps. ignoring last sps");
+                        sps.clear();
+                    }
+
+                    printf("have sps: size=%u\n", nalu.size);
+                    dumpv(data + nalu.offset, nalu.size, nalu.size);
+                    sps.insert(std::begin(sps), data + nalu.offset,
+                               data + nalu.offset + nalu.size);
+                    last_sps = count;
+                    break;
+                case GST_H264_NAL_PPS:
+                    assert(pps.empty());
+                    assert(count > last_sps);
+                    if(count - last_sps > 1)
+                        printf("distance: pps - sps > 1: %zu\n", count - last_sps);
+                    printf("have pps: size=%u\n", nalu.size);
+                    dumpv(data + nalu.offset, nalu.size, nalu.size);
+                    if(sps.empty()) {
+                        puts("no sps before pps. ignoring pps");
+                        break;
+                    }
+                    pps.insert(std::begin(pps), data + nalu.offset,
+                               data + nalu.offset + nalu.size);
+                    assert(!sps.empty() && !pps.empty());
+                    encode_sprops(sps, pps);
+                    have = true;
+                    puts("");
+                    sps.clear();
+                    pps.clear();
+
                     break;
                 }
-            break;
-        }
 
-        const uint8_t start_code[] = { 0x0, 0x0, 0x01 };
-        const void *x;
-        size_t off = 0;
-
-        size_t last_start = 0;
-        while((x = memmem(&buf[off], ret - off, start_code, sizeof(start_code))) != NULL) {
-            size_t start = (uintptr_t)x - (uintptr_t)&buf[0];
-            const auto start_code_size = (start > 0 && buf[start - 1] == 0u) ? 4 : 3;
-            //std::cout << "have NALU at offset " << total + start << " off=" << start << "\n";
-            if((size_t)ret == off)
-                break;
-            const size_t len = start - off;
-            off = start + sizeof(start_code);
-            if(old_off > 0) {
-                if(start == 0) {
-                    if(!lambda(reinterpret_cast<unsigned char *>(&old[old_off]), old_size - old_off)) {
-                        exit = true;
-                        break;
-                    }
-                    if(!lambda(reinterpret_cast<unsigned char *>(&buf[off]), len)) {
-                        exit = true;
-                        break;
-                    }
-                } else {
-                    std::rotate(std::begin(old), std::begin(old) + old_off, std::end(old));
-                    memcpy(reinterpret_cast<unsigned char *>(&old[old_size - old_off]), &buf[0], start);
-                    if(!lambda(reinterpret_cast<unsigned char *>(&old[0]), old_size - old_off + start)) {
-                        exit = true;
-                        break;
-                    }
-                }
-                old_off = 0;
-            } else {
-                if(last_start > 0)
-                    if(!lambda(reinterpret_cast<unsigned char *>(&buf[last_start + sizeof(start_code)]), start - last_start - start_code_size)) {
-                        exit = true;
-                        break;
-                    }
-                last_start = start;
-            }
-        }
-        if(exit)
-            break;
-
-        if(old_off)
-            ;
-
-        old_off = off;
-        old_size = ret;
-        //std::cout << "buf done. left = " << ret - old_off << "\n\n";
-        if(old_off)
-            std::swap(buf, old);
-        total += off;
-    } while(ret > 0);
-    close(fd);
-}
-
-bool get_spspps(const char *file)
-{
-    std::vector<std::vector<unsigned char>> sps;
-    std::vector<std::vector<unsigned char>> pps;
-    for_each_nalu(file, [&sps, &pps](const unsigned char *nalu, size_t len) {
-            std::cout << "  nalu len = " << len << " first 20 are: ";
-            dumpv(nalu, len, 20);
-            assert((nalu[0] & 0x80) == 0);
-            std::cout << "NAL_REF_IDC = " << (unsigned int)((nalu[0] & 0xe0) >> 5) << " ";
-            std::cout << "NAL_TYPE = " << (unsigned int)((nalu[0] & 0x1f)) << " ";
-            assert(((nalu[0] & 0xe0) >> 5) == 3); // x264 sets nal_ref_idc always to 3(highest priority IDR)
-
-            switch(nalu[0] & 0x1f) {
-            case 7:
-                std::cout << "SPS\n";
-                sps.emplace_back(nalu, nalu + len);
-                break;
-            case 8:
-                std::cout << "PPS\n";
-                if(pps.empty())
-                    pps.emplace_back(nalu, nalu + len);
-                break;
-            case 9: std::cout << "AUD\n"; break;
-            default: std::cout << "OTHER\n"; break;
-            }
-                return true;
+                off = nalu.offset + nalu.size;
+            } while(true);
+            return std::make_pair(true, off);
         });
-
-    assert(sps.size() == pps.size());
-    for(size_t i = 0; i < sps.size(); i++)
-        encode_sprops(sps[i], pps[i]);
-
-    return true;
+    gst_h264_nal_parser_free(parser);
+    return have;
 }
+
 
 void usage(const char *arg0)
 {
@@ -295,7 +278,7 @@ int main(int argc, char *argv[])
         else
             ok = decode_sprops(argv[1]);
     } else {
-        ok = get_spspps(argv[1]);
+        ok = do_blockwise(argv[1]);
     }
 
     if(!ok) {
