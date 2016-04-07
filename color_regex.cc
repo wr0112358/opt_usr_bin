@@ -17,11 +17,11 @@ echo "abc" | ./color_regex a --whole_line
 #include <regex>
 #include <string>
 
-#include "../fragments/include_common/term_color.hh"
+#include <libaan/terminal.hh>
 
 namespace {
 struct opt_t {
-    common::color_type color {common::RED};
+    libaan::color_type color {libaan::RED};
     std::string regex;
     bool whole_line {false};
 };
@@ -34,7 +34,7 @@ std::pair<bool, opt_t> parse_args(int argc, char *argv[])
             ++i;
             if(i >= argc)
                 return std::make_pair(false, ret);
-            ret.color = common::string_to_color(argv[i]);
+            ret.color = libaan::string_to_color(argv[i]);
         } else if(strcmp(argv[i], "--regex") == 0) {
             ++i;
             if(i >= argc)
@@ -76,10 +76,10 @@ inline std::string colorize_if(std::string &&line, const std::regex &reg,
 
     if(!match.empty()) {
         if(opts.whole_line)
-            return common::colorize(opts.color, std::move(line));
+            return libaan::colorize(opts.color, std::move(line));
 
         for(auto m: match)
-            replace(line, m, common::colorize(opts.color, m));
+            replace(line, m, libaan::colorize(opts.color, m));
     }
     return line;
 }
