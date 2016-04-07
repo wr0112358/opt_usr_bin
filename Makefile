@@ -3,7 +3,7 @@ default:
 
 CXXFLAGS = -Wall -Werror -O3 -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan)
 #CXXFLAGS = -Wall -Werror -O0 -g -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan) -fsanitize=address -fno-omit-frame-pointer
-LDLIBS=-lasan
+#LDLIBS=-lasan
 color_regex: color_regex.cc
 hex_search: hex_search.cc
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
