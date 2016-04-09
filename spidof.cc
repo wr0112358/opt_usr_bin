@@ -15,12 +15,12 @@ Problems:
 
 */
 
-#include <libaan/file.hh>
-
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <experimental/filesystem>
 
 static const char *get_basename(const char *filename)
 {
@@ -38,12 +38,15 @@ int main(int argc, char *argv[])
 
     const std::string name(argv[1]);
     bool have = false;
-    auto const f = [&name, &have](const std::string &path, const struct dirent *p) {
-        const auto pid = std::atoi(p->d_name);
+    auto const f = [&name, &have](const std::experimental::filesystem::path &path) {
+        const auto pid = std::atoi(path.filename().c_str());
         if(pid == 0)
             return true;
-        std::string buff;
-        buff.resize(libaan::read_file((path + p->d_name + "/cmdline").c_str(), buff, 512));
+        std::string buff(512, '\0');
+        {
+            std::ifstream fp((path.string() + "/cmdline").c_str());
+            buff.resize(fp.read(&*buff.begin(), buff.length()).gcount());
+        }
 
         const char * base = get_basename(buff.c_str());
 
@@ -57,7 +60,14 @@ int main(int argc, char *argv[])
     };
 
     for(size_t i = 0; i < 50; i++) {
-        libaan::readdir2("/proc/", f);
+        for(auto &it: std::experimental::filesystem::directory_iterator("/proc")) {
+            std::error_code ec;
+            if(!std::experimental::filesystem::is_directory(it, ec))
+                continue;
+            f(it.path());
+            if(have)
+                break;
+        }
         if(have)
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

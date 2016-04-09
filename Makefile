@@ -2,15 +2,18 @@ default:
 	@echo "no target specified. Try: make clean all && sudo make install"
 
 
-CXXFLAGS = -Wall -Werror -O3 -std=c++1y $(shell pkg-config --cflags libaan) -flto
+CXXFLAGS = -Wall -Werror -O3 -std=c++1y -flto
 LDFLAGS=-flto
-LDLIBS=-Wl,--as-needed $(shell pkg-config --libs libaan)
+LDLIBS=-Wl,--as-needed
 
 #CXXFLAGS = -Wall -Werror -O0 -g -std=c++1y $(shell pkg-config --cflags libaan) $(shell pkg-config --libs libaan) -fsanitize=address -fno-omit-frame-pointer
 #LDLIBS=-lasan
 
+color_regex: LDFLAGS+=$(shell pkg-config --libs libaan)
 color_regex: color_regex.cc
+hex_search: LDFLAGS+=$(shell pkg-config --libs libaan)
 hex_search: hex_search.cc
+open_shell_in_cwd_of: LDFLAGS+=$(shell pkg-config --libs libaan)
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
 spidof: LDLIBS += -lstdc++fs
 spidof: spidof.cc
