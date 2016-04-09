@@ -1,3 +1,0 @@
-[submodule "deps/libaan"]
-	path = deps/libaan
-	url = git://github.com/wr0112358/libaan.git
