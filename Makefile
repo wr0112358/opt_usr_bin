@@ -12,6 +12,7 @@ LDLIBS=-Wl,--as-needed $(shell pkg-config --libs libaan)
 color_regex: color_regex.cc
 hex_search: hex_search.cc
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
+spidof: LDLIBS += -lstdc++fs
 spidof: spidof.cc
 
 h264_sprop_parameter_sets: CC=$(CXX)
@@ -22,13 +23,13 @@ h264_sprop_parameter_sets: h264_sprop_parameter_sets.o
 TOOLS=color_regex hex_search open_shell_in_cwd_of spidof h264_sprop_parameter_sets
 
 clean:
-	rm -f $(TOOLS) *.o
+	rm -rf $(TOOLS) *.o .deps/
 
 .PHONY: depend
 depend:
-	git submodule update --init
-	$(MAKE) -C deps/libaan clean build
-	sudo $(MAKE) -C deps/libaan install
+	mkdir .deps/ && cd .deps && git clone https://github.com/wr0112358/libaan.git
+	$(MAKE) -C .deps/libaan clean build
+	sudo $(MAKE) -C .deps/libaan install
 
 all:  $(TOOLS)
 
