@@ -16,6 +16,7 @@ hex_search: hex_search.cc
 open_shell_in_cwd_of: LDFLAGS+=$(shell pkg-config --libs libaan)
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
 spidof: LDLIBS += -lstdc++fs
+spidof: CXXFLAGS += -DUSE_PROC_CONN
 spidof: spidof.cc
 
 h264_sprop_parameter_sets: CC=$(CXX)
