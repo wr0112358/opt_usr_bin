@@ -22,6 +22,10 @@ Problems:
 #include <thread>
 #include <experimental/filesystem>
 
+#ifdef USE_PROC_CONN
+
+#endif
+
 static const char *get_basename(const char *filename)
 {
     const char *result = filename;
@@ -29,6 +33,26 @@ static const char *get_basename(const char *filename)
         if(*(filename++) == '/')
             result = filename;
     return result;
+}
+
+static bool check_pid(const std::string &name, pid_t pid)
+{
+//    std::cout << name << "/" << pid << "\n";
+    std::string buff(512, '\0');
+    {
+        char path[256];
+        std::snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
+        std::ifstream fp(path);
+        buff.resize(fp.read(&*buff.begin(), buff.length()).gcount());
+    }
+    const char * base = get_basename(buff.c_str());
+
+    // oneshot
+    if(std::strncmp(name.c_str(), base, name.length()) == 0) {
+        std::cout << pid << "\n" << std::flush;
+        return true;
+    }
+    return false;
 }
 
 int main(int argc, char *argv[])
@@ -42,21 +66,11 @@ int main(int argc, char *argv[])
         const auto pid = std::atoi(path.filename().c_str());
         if(pid == 0)
             return true;
-        std::string buff(512, '\0');
-        {
-            std::ifstream fp((path.string() + "/cmdline").c_str());
-            buff.resize(fp.read(&*buff.begin(), buff.length()).gcount());
-        }
-
-        const char * base = get_basename(buff.c_str());
-
-        // oneshot
-        if(std::strncmp(name.c_str(), base, name.length()) == 0) {
-            std::cout << pid << "\n" << std::flush;
+        if(check_pid(name, pid)) {
             have = true;
             return false;
         }
-        return true;
+        return false;
     };
 
     for(size_t i = 0; i < 50; i++) {
