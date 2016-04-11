@@ -1,3 +1,4 @@
+// TODO: once running exec_notify with sudo is necessary for this to work?!
 /*
 "stalling pidof"
 
@@ -50,28 +51,13 @@ void filter(int sock)
     // return amount of bytes of the packet
     // context: | struct nlmsghdr | struct cn_msg | struct proc_event ... |
     struct sock_filter f[] = {
-        // 1. passthrough filter
-        // 0xffffffff i.e. all there is
-        // BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
-
-
-        // 2. block all packets
-        //BPF_STMT(BPF_RET | BPF_K, 0),
-
-
-        // 3. filter netlink messages: return all bytes for unexpected packets?
-
-        // 3.1. return all if type != NLMSG_DONE
-        // load _H_alfword(16bit) from _ABS_olute offset given in argument.
-        // store in accumulator
+        // 1. return all if type != NLMSG_DONE
         BPF_STMT(BPF_LD | BPF_H | BPF_ABS,
                  __builtin_offsetof(struct nlmsghdr, nlmsg_type)),
-        // Compare value stored in accumulator(nlmsg_type) against NLMSG_DONE
-        // constant. If equal jump 1 statement else none
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, htons(NLMSG_DONE), 1, 0),
         BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
 
-        // 3.2. return all if cn_msg::id::idx != CN_IDX_PROC
+        // 2. return all if cn_msg::id::idx != CN_IDX_PROC
         // load 32bit id from absolute address given in argument
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
                  // skip nlmsghdr
@@ -82,16 +68,16 @@ void filter(int sock)
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, htonl(CN_IDX_PROC), 1, 0),
         BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
 
-        // 3.3. return all if cn_msg::id::val != CN_VAL_PROC
+        // 3. return all if cn_msg::id::val != CN_VAL_PROC
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
                  NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, id)
                  + __builtin_offsetof(struct cb_id, val)),
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, htonl(CN_VAL_PROC), 1, 0),
         BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
 
-        // at this point we know: packet contains 1 netlink msg from proc_cn
+        // packet contains 1 netlink msg from proc_cn
 
-        // 3.4. if proc_event type is not PROC_EVENT_FORK or PROC_EVENT_EXEC, throw away packet
+        // 4. if proc_event type is not PROC_EVENT_EXEC, throw away packet
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
                  NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, data)
                  + __builtin_offsetof(struct proc_event, what)),
@@ -102,47 +88,8 @@ void filter(int sock)
               return 0xffffffff // EXEC -> do not check fields
               ... // FORK -> do field checking
              */
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, htonl(proc_event::PROC_EVENT_FORK), 3, 0),
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, htonl(proc_event::PROC_EVENT_EXEC), 1, 0),
         BPF_STMT(BPF_RET | BPF_K, 0),
-        BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
-
-        // 3.5. if pid/tgid values are inequal(new thread, not a new process),
-        //      throw away packet
-        // load parent_pid in accumulator
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                 NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, data)
-                 + __builtin_offsetof(struct proc_event, event_data)
-                 + offsetof_struct_in_anonymousunion_in_struct(proc_event, event_data, fork, parent_pid)),
-        // store value from accumulator in scratch memory
-        BPF_STMT(BPF_ST, 0),
-        // load scratch memory content to index register
-        BPF_STMT(BPF_LDX | BPF_W | BPF_MEM, 0),
-
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                 NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, data)
-                 + __builtin_offsetof(struct proc_event, event_data)
-                 + offsetof_struct_in_anonymousunion_in_struct(proc_event, event_data, fork, parent_tgid)),
-        // compare value in index register with value in accumulator
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_X, 0, 1, 0),
-        // pid != tgid -> throw away
-        BPF_STMT(BPF_RET | BPF_K, 0),
-
-        // same for child:
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                 NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, data)
-                 + __builtin_offsetof(struct proc_event, event_data)
-                 + offsetof_struct_in_anonymousunion_in_struct(proc_event, event_data, fork, child_pid)),
-        BPF_STMT(BPF_ST, 0),
-        BPF_STMT(BPF_LDX | BPF_W | BPF_MEM, 0),
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                 NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, data)
-                 + __builtin_offsetof(struct proc_event, event_data)
-                 + offsetof_struct_in_anonymousunion_in_struct(proc_event, event_data, fork, child_tgid)),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_X, 0, 1, 0),
-        BPF_STMT(BPF_RET | BPF_K, 0),
-
-        // parent_tgid == parent_pid && child_tgid == child_pid
         BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
     };
 
@@ -285,7 +232,7 @@ struct fork_handler_t {
         }
         drop_priv();
 
-        filter(fd);
+//        filter(fd);
 
         { // send subscription message
             char nlmsghdrbuf[NLMSG_LENGTH(0)];
@@ -391,23 +338,16 @@ struct fork_handler_t {
 
             struct cn_msg *cn_msg = (struct cn_msg *)NLMSG_DATA(nlhdr);
             if((cn_msg->id.idx != CN_IDX_PROC)
-               || (cn_msg->id.val != CN_VAL_PROC))
+               || (cn_msg->id.val != CN_VAL_PROC)) {
+                puts("WRONG!!11");
                 continue;
+            }
 
             ok++;
+            printf("ok/total: %zu/%zu\n", ok, total);
+
             proc_event *ev = (struct proc_event *)cn_msg->data;
             switch(ev->what) {
-            case proc_event::PROC_EVENT_FORK:
-                // if pid != tgid -> new thread, else new process
-                printf("FORK ppid: %d, ptgid: %d -> child pid: %d, "
-                       "child tgid: %d - ignored %lu of %lu packets\n",
-                       ev->event_data.fork.parent_pid,
-                       ev->event_data.fork.parent_tgid,
-                       ev->event_data.fork.child_pid,
-                       ev->event_data.fork.child_tgid,
-                       total - ok, total);
-                cb(ev->event_data.fork.parent_pid, ev->event_data.fork.child_pid);
-                break;
             case proc_event::PROC_EVENT_EXEC:
                 // if pid != tgid -> new thread, else new process
                 printf("EXEC pid: %d tgid: %d\n",
@@ -419,6 +359,7 @@ struct fork_handler_t {
                 printf("OTHER %d/%d\n",
                        ev->event_data.fork.parent_pid,
                        ev->event_data.fork.parent_tgid);
+                //assert(false);
                 break;
             }
         }
@@ -484,6 +425,7 @@ bool proc_iterate(const std::string &name)
         if(have)
             break;
     }
+    return have;
 }
 
 int main(int argc, char *argv[])
@@ -494,19 +436,27 @@ int main(int argc, char *argv[])
     const std::string name(argv[1]);
 
 #ifdef USE_PROC_CONN
+    // subscribe for events..
     fork_handler_t fork_notify;
-    if(fork_notify.is_ok() && !proc_iterate(name)) {
-        for(size_t i = 0; i < 50; i++) {
+    if(fork_notify.is_ok()) {
+        // ..check existing processes first
+        if(proc_iterate(name)) {
+            std::cerr << "\n";
+            return 0;
+        }
+
+        for(size_t i = 0; i < 50;) {
             if(!fork_notify.wait_for(100)) {
                 std::cerr << "." << std::flush;
                 if(!fork_notify.is_ok())
                     break;
+                ++i;
                 continue;
             }
+            puts("try_rx ->");
             bool have = false;
             fork_notify.try_rx([&name, &have](pid_t ppid, pid_t pid) {
                     fprintf(stderr, "try_rx callback: ppid/pid: %d/%d\n", ppid, pid);
-
                     if(check_pid(name, pid))
                         have = true; });
             if(have)

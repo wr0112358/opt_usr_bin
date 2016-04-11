@@ -15,7 +15,7 @@ hex_search: LDFLAGS+=$(shell pkg-config --libs libaan)
 hex_search: hex_search.cc
 open_shell_in_cwd_of: LDFLAGS+=$(shell pkg-config --libs libaan)
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
-spidof: LDLIBS += -lstdc++fs
+spidof: LDLIBS += -lstdc++fs -lcap
 spidof: CXXFLAGS += -DUSE_PROC_CONN
 spidof: spidof.cc
 
