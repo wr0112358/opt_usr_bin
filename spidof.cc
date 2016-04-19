@@ -1,4 +1,6 @@
-// TODO: once running exec_notify with sudo is necessary for this to work?!
+// TODO: once running exec_notify with sudo is necessary for this to work?! after reboot problem starts again.
+// -> modprobe cn ? not shown in lsmod?
+// -> not dropping privs solves the problem?! -> drop only after subscription msg?
 /*
 "stalling pidof"
 
@@ -230,7 +232,7 @@ struct fork_handler_t {
             fd = -1;
             return;
         }
-        drop_priv();
+//        drop_priv();
 
 //        filter(fd);
 
@@ -274,6 +276,7 @@ struct fork_handler_t {
         }
 
         buf.resize(getpagesize());
+//        drop_priv();
     }
 
     ~fork_handler_t()
