@@ -1,6 +1,3 @@
-// TODO: once running exec_notify with sudo is necessary for this to work?! after reboot problem starts again.
-// -> modprobe cn ? not shown in lsmod?
-// -> not dropping privs solves the problem?! -> drop only after subscription msg?
 /*
 "stalling pidof"
 
@@ -47,7 +44,8 @@ extern "C" {
 #define offsetof_struct_in_anonymousunion_in_struct(outer_struct_type, union_name, inner_struct_name, field) \
     ((char*)&((outer_struct_type*)0)->union_name.inner_struct_name.field) - ((char*)&((outer_struct_type*)0)->union_name.inner_struct_name)
 
-// filter adapted from: http://netsplit.com/the-proc-connector-and-socket-filters
+// Filter out all non-relevant messages in the kernel.
+// adapted from: http://netsplit.com/the-proc-connector-and-socket-filters
 void filter(int sock)
 {
     // return amount of bytes of the packet
@@ -83,13 +81,6 @@ void filter(int sock)
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
                  NLMSG_LENGTH(0) + __builtin_offsetof(struct cn_msg, data)
                  + __builtin_offsetof(struct proc_event, what)),
-            /*
-              if PROC_EVENT_FORK jmp 3
-              if PROC_EVENT_EXEC jmp 1
-              return 0 // != FORK && != EXEC
-              return 0xffffffff // EXEC -> do not check fields
-              ... // FORK -> do field checking
-             */
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, htonl(proc_event::PROC_EVENT_EXEC), 1, 0),
         BPF_STMT(BPF_RET | BPF_K, 0),
         BPF_STMT(BPF_RET | BPF_K, 0xffffffff),
@@ -232,7 +223,6 @@ struct fork_handler_t {
             fd = -1;
             return;
         }
-//        drop_priv();
 
         filter(fd);
 
@@ -274,9 +264,12 @@ struct fork_handler_t {
             assert(size_t(tx) == (iov[0].iov_len + iov[1].iov_len + iov[2].iov_len));
             std::cerr << "subscription ok\n";
         }
-
+        // If capabilites are dropped before sending the subscription
+        // message leads to strange behavior: no messages will be
+        // received until subscription message is sent once with
+        // uid=0.
+        drop_priv();
         buf.resize(getpagesize());
-//        drop_priv();
     }
 
     ~fork_handler_t()
@@ -337,12 +330,13 @@ struct fork_handler_t {
             total++;
             if((nlhdr->nlmsg_type == NLMSG_ERROR)
                || (nlhdr->nlmsg_type == NLMSG_NOOP))
+                assert(false);
                 continue;
 
             struct cn_msg *cn_msg = (struct cn_msg *)NLMSG_DATA(nlhdr);
             if((cn_msg->id.idx != CN_IDX_PROC)
                || (cn_msg->id.val != CN_VAL_PROC)) {
-                std::cerr << "WRONG!!11\n";
+                assert(false);
                 continue;
             }
 
@@ -360,8 +354,8 @@ struct fork_handler_t {
             default:
                 std::cerr << "OTHER " << ev->event_data.fork.parent_pid
                           << "/" << ev->event_data.fork.parent_tgid << "\n";
-
-                //assert(false); // shouldnt occur with filter active
+                // shouldnt occur with filter active
+                assert(false);
                 break;
             }
         }
@@ -403,7 +397,7 @@ static bool check_pid(const std::string &name, pid_t pid)
         return true;
     }
 
-    std::cerr << "mismatch: " << base << "\n";
+//    std::cerr << "mismatch: " << base << "\n";
     return false;
 }
 
@@ -440,10 +434,10 @@ int main(int argc, char *argv[])
     const std::string name(argv[1]);
 
 #ifdef USE_PROC_CONN
-    // subscribe for events..
+    // subscribe for events
     fork_handler_t fork_notify;
     if(fork_notify.is_ok()) {
-        // ..check existing processes first
+        // check existing processes first
         if(proc_iterate(name)) {
             std::cerr << "\n";
             return 0;
@@ -457,10 +451,9 @@ int main(int argc, char *argv[])
                 ++i;
                 continue;
             }
-            std::cerr << "try_rx ->\n";
             bool have = false;
             fork_notify.try_rx([&name, &have](pid_t pid, pid_t tgid) {
-                    std::cerr << "try_rx callback: pid/tgid: " << pid << "/" << tgid << "\n";
+                    //std::cerr << "pid/tgid: " << pid << "/" << tgid << "\n";
                     if(check_pid(name, pid))
                         have = true; });
             if(have)
