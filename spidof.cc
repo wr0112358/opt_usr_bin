@@ -9,6 +9,8 @@ htop -p $(/opt/usr/bin/spidof h264dec)
 
 */
 
+#include <atomic>
+#include <csignal>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -35,6 +37,8 @@ extern "C" {
 #include <cassert>
 #include <fstream>
 #include <vector>
+
+namespace {
 
 // Filter out all non-relevant messages in the kernel.
 // adapted from: http://netsplit.com/the-proc-connector-and-socket-filters
@@ -88,106 +92,92 @@ void filter(int sock)
 bool get_priv()
 {
     cap_value_t cap_list[1] = { CAP_NET_ADMIN };
-    cap_flag_value_t cap_flags_value;
-    bool ret = false;
 
     if(!CAP_IS_SUPPORTED(CAP_NET_ADMIN)) {
         std::cerr << "Capability CAP_NET_ADMIN is not supported\n";
         return false;
     }
 
-    cap_t capabilities = cap_get_proc();
-    if(capabilities == NULL) {
+    cap_t caps = cap_get_proc();
+    if(caps == NULL) {
         perror("cap_get_proc");
         return false;
     }
 
     // Ensure that CAP_NET_ADMIN is permitted
-    if(cap_get_flag(capabilities, cap_list[0], CAP_PERMITTED, &cap_flags_value) == -1) {
+    bool ret = false;
+    cap_flag_value_t flag;
+    if(cap_get_flag(caps, cap_list[0], CAP_PERMITTED, &flag) == -1) {
         perror("cap_get_flag");
         goto out;
     }
-    if(cap_flags_value == CAP_CLEAR) {
+    if(flag == CAP_CLEAR) {
         std::cerr << "Capability CAP_NET_ADMIN is not CAP_PERMITTED, run setcap CAP_NET_ADMIN=p <binary>\n";
         goto out;
     }
 
     // Test if CAP_NET_ADMIN is effective, else make it effective
-    if(cap_get_flag(capabilities, cap_list[0], CAP_EFFECTIVE, &cap_flags_value) == -1) {
+    if(cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == -1) {
         perror("cap_get_flag");
         goto out;
     }
 
-    if(cap_flags_value == CAP_CLEAR) {
-        if(cap_set_flag(capabilities, CAP_EFFECTIVE, 1, cap_list, CAP_SET) == -1) {
+    if(flag == CAP_CLEAR) {
+        if(cap_set_flag(caps, CAP_EFFECTIVE, 1, cap_list, CAP_SET) == -1) {
             perror("cap_set_flag");
             goto out;
         }
 
-        if(cap_set_proc(capabilities) == -1){
+        if(cap_set_proc(caps) == -1) {
             perror("cap_set_proc");
             goto out;
         }
 
-        if(cap_get_flag(capabilities, cap_list[0], CAP_EFFECTIVE, &cap_flags_value) == -1) {
-            perror("cap_get_flag");
-            goto out;
-        }
-
-        if(cap_flags_value == CAP_CLEAR) {
-            std::cerr << "Failed to set capability CAP_NET_ADMIN to CAP_EFFECTIVE\n";
-            goto out;
-        }
+        assert(cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == 0
+               && flag == CAP_SET);
     }
     ret = true;
 
 out:
-    cap_free(capabilities);
+    cap_free(caps);
     return ret;
 }
 
 bool drop_priv()
 {
     cap_value_t cap_list[1] = { CAP_NET_ADMIN };
-    cap_flag_value_t cap_flags_value;
+    cap_flag_value_t flag;
     bool ret = false;
 
-    auto capabilities = cap_get_proc();
-    if(capabilities == NULL) {
+    auto caps = cap_get_proc();
+    if(caps == NULL) {
         perror("cap_get_proc");
         return false;
     }
 
-    if(cap_get_flag(capabilities, cap_list[0], CAP_EFFECTIVE, &cap_flags_value) == -1) {
+    if(cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == -1) {
         perror("cap_get_flag");
         goto out;
     }
 
-    // Drop CAP_NET_ADMIN to permitted if it's effective
-    if(cap_flags_value == CAP_SET) {
-        if(cap_set_flag(capabilities, CAP_EFFECTIVE, 1, cap_list, CAP_CLEAR) == -1) {
+    // Drop CAP_NET_ADMIN to permitted if effective
+    if(flag == CAP_SET) {
+        if(cap_set_flag(caps, CAP_EFFECTIVE, 1, cap_list, CAP_CLEAR) == -1) {
             perror("cap_set_flag");
             goto out;
         }
-        if(cap_set_proc(capabilities) == -1) {
+        if(cap_set_proc(caps) == -1) {
             perror("cap_set_proc");
             goto out;
         }
 
-        if(cap_get_flag(capabilities, cap_list[0], CAP_PERMITTED, &cap_flags_value) == -1) {
-            perror("cap_get_flag");
-            goto out;
-        }
-
-        if(cap_flags_value == CAP_CLEAR) {
-            std::cerr << "Failed to drop capability CAP_NET_ADMIN privileges to CAP_PERMITTED";
-            goto out;
-        }
+        assert(cap_get_flag(caps, cap_list[0], CAP_PERMITTED, &flag) == 0
+               && flag == CAP_SET);
     }
     ret = true;
 
 out:
-    cap_free(capabilities);
+    cap_free(caps);
     return ret;
 }
 
@@ -198,7 +188,7 @@ struct fork_handler_t {
         if(!get_priv())
             return;
         fd = socket(PF_NETLINK, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-                          NETLINK_CONNECTOR);
+                    NETLINK_CONNECTOR);
         if(fd == -1) {
             perror("socket");
             return;
@@ -360,9 +350,12 @@ struct fork_handler_t {
     std::vector<char> buf;
 };
 
+}
+
 #endif
 
-static const char *get_basename(const char *filename)
+namespace {
+const char *get_basename(const char *filename)
 {
     const char *result = filename;
     while(*filename != '\0')
@@ -418,10 +411,24 @@ bool proc_iterate(const std::string &name)
     return have;
 }
 
+std::atomic_bool sigint;
+void sighandler(int)
+{
+    sigint = true;
+}
+}
+
 int main(int argc, char *argv[])
 {
     if(argc != 2)
         return -1;
+
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = sighandler;
+    sa.sa_flags = SA_RESTART;
+    if(sigaction(SIGINT, &sa, NULL) == -1)
+        perror("sigaction");
 
     const std::string name(argv[1]);
 
@@ -435,7 +442,7 @@ int main(int argc, char *argv[])
             return 0;
         }
 
-        for(size_t i = 0; i < 200;) {
+        for(size_t i = 0; i < 200 && !sigint;) {
             if(!fork_notify.wait_for(100)) {
                 std::cerr << "." << std::flush;
                 if(!fork_notify.is_ok())
@@ -445,7 +452,7 @@ int main(int argc, char *argv[])
             }
             bool have = false;
             fork_notify.try_rx([&name, &have](pid_t pid, pid_t tgid) {
-                    //std::cerr << "pid/tgid: " << pid << "/" << tgid << "\n";
+                    std::cerr << "pid/tgid: " << pid << "/" << tgid << "\n";
                     if(check_pid(name, pid))
                         have = true; });
             if(have)
@@ -456,7 +463,7 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    for(size_t i = 0; i < 200; i++) {
+    for(size_t i = 0; i < 200 && !sigint; i++) {
         if(proc_iterate(name))
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
