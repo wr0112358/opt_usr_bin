@@ -7,12 +7,6 @@ Usage example:
 sudo perf top -p $(/opt/usr/bin/spidof h264dec)
 htop -p $(/opt/usr/bin/spidof h264dec)
 
-Problems:
- - must iterate over procfs again and again.
-   possible workarounds:
-     + "proc connector" polling api is perfect for the job, but needs root(CAP_NET_ADMIN).
-     + inotify on /lib64/ld-2.21.so could reduce interval of busy wait and amount of folders to read?
-
 */
 
 #include <cstring>
@@ -23,6 +17,7 @@ Problems:
 #include <experimental/filesystem>
 
 #ifdef USE_PROC_CONN
+// Employ proc connector API to reduce need for polling /proc.
 
 extern "C" {
 #include <linux/cn_proc.h>
@@ -40,9 +35,6 @@ extern "C" {
 #include <cassert>
 #include <fstream>
 #include <vector>
-
-#define offsetof_struct_in_anonymousunion_in_struct(outer_struct_type, union_name, inner_struct_name, field) \
-    ((char*)&((outer_struct_type*)0)->union_name.inner_struct_name.field) - ((char*)&((outer_struct_type*)0)->union_name.inner_struct_name)
 
 // Filter out all non-relevant messages in the kernel.
 // adapted from: http://netsplit.com/the-proc-connector-and-socket-filters
