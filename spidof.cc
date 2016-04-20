@@ -109,7 +109,7 @@ bool get_priv()
     bool ret = false;
 
     if(!CAP_IS_SUPPORTED(CAP_NET_ADMIN)) {
-        puts("Capability CAP_NET_ADMIN is not supported\n");
+        std::cerr << "Capability CAP_NET_ADMIN is not supported\n";
         return false;
     }
 
@@ -125,7 +125,7 @@ bool get_priv()
         goto out;
     }
     if(cap_flags_value == CAP_CLEAR) {
-        puts("Capability CAP_NET_ADMIN is not CAP_PERMITTED, run setcap CAP_NET_ADMIN=p <binary>");
+        std::cerr << "Capability CAP_NET_ADMIN is not CAP_PERMITTED, run setcap CAP_NET_ADMIN=p <binary>\n";
         goto out;
     }
 
@@ -152,7 +152,7 @@ bool get_priv()
         }
 
         if(cap_flags_value == CAP_CLEAR) {
-            puts("Failed to set capability CAP_NET_ADMIN to CAP_EFFECTIVE");
+            std::cerr << "Failed to set capability CAP_NET_ADMIN to CAP_EFFECTIVE\n";
             goto out;
         }
     }
@@ -165,7 +165,7 @@ out:
 
 bool drop_priv()
 {
-cap_value_t cap_list[1] = { CAP_NET_ADMIN };
+    cap_value_t cap_list[1] = { CAP_NET_ADMIN };
     cap_flag_value_t cap_flags_value;
     bool ret = false;
 
@@ -197,7 +197,7 @@ cap_value_t cap_list[1] = { CAP_NET_ADMIN };
         }
 
         if(cap_flags_value == CAP_CLEAR) {
-            puts("Failed to drop capability CAP_NET_ADMIN privileges to CAP_PERMITTED");
+            std::cerr << "Failed to drop capability CAP_NET_ADMIN privileges to CAP_PERMITTED";
             goto out;
         }
     }
@@ -234,7 +234,7 @@ struct fork_handler_t {
         }
 //        drop_priv();
 
-//        filter(fd);
+        filter(fd);
 
         { // send subscription message
             char nlmsghdrbuf[NLMSG_LENGTH(0)];
@@ -272,7 +272,7 @@ struct fork_handler_t {
             }
             // TODO: writev for datagram socket means all iovs or none?
             assert(size_t(tx) == (iov[0].iov_len + iov[1].iov_len + iov[2].iov_len));
-            puts("subscription ok");
+            std::cerr << "subscription ok\n";
         }
 
         buf.resize(getpagesize());
@@ -342,27 +342,26 @@ struct fork_handler_t {
             struct cn_msg *cn_msg = (struct cn_msg *)NLMSG_DATA(nlhdr);
             if((cn_msg->id.idx != CN_IDX_PROC)
                || (cn_msg->id.val != CN_VAL_PROC)) {
-                puts("WRONG!!11");
+                std::cerr << "WRONG!!11\n";
                 continue;
             }
 
             ok++;
-            printf("ok/total: %zu/%zu\n", ok, total);
+            std::cerr << "ok/total: " << ok << "/" << total << "\n";
 
             proc_event *ev = (struct proc_event *)cn_msg->data;
             switch(ev->what) {
             case proc_event::PROC_EVENT_EXEC:
-                // if pid != tgid -> new thread, else new process
-                printf("EXEC pid: %d tgid: %d\n",
-                       ev->event_data.exec.process_pid,
-                       ev->event_data.exec.process_pid);
-                cb(ev->event_data.fork.parent_pid, ev->event_data.fork.child_pid);
+                // if pid != tgid -> new thread, else new process -> should be filtered out
+                std::cerr << "EXEC pid: " << ev->event_data.exec.process_pid
+                          << " tgid:" << ev->event_data.exec.process_tgid << "\n";
+                cb(ev->event_data.exec.process_pid, ev->event_data.exec.process_tgid);
                 break;
             default:
-                printf("OTHER %d/%d\n",
-                       ev->event_data.fork.parent_pid,
-                       ev->event_data.fork.parent_tgid);
-                //assert(false);
+                std::cerr << "OTHER " << ev->event_data.fork.parent_pid
+                          << "/" << ev->event_data.fork.parent_tgid << "\n";
+
+                //assert(false); // shouldnt occur with filter active
                 break;
             }
         }
@@ -403,6 +402,8 @@ static bool check_pid(const std::string &name, pid_t pid)
         std::cout << pid << "\n" << std::flush;
         return true;
     }
+
+    std::cerr << "mismatch: " << base << "\n";
     return false;
 }
 
@@ -448,7 +449,7 @@ int main(int argc, char *argv[])
             return 0;
         }
 
-        for(size_t i = 0; i < 50;) {
+        for(size_t i = 0; i < 200;) {
             if(!fork_notify.wait_for(100)) {
                 std::cerr << "." << std::flush;
                 if(!fork_notify.is_ok())
@@ -456,10 +457,10 @@ int main(int argc, char *argv[])
                 ++i;
                 continue;
             }
-            puts("try_rx ->");
+            std::cerr << "try_rx ->\n";
             bool have = false;
-            fork_notify.try_rx([&name, &have](pid_t ppid, pid_t pid) {
-                    fprintf(stderr, "try_rx callback: ppid/pid: %d/%d\n", ppid, pid);
+            fork_notify.try_rx([&name, &have](pid_t pid, pid_t tgid) {
+                    std::cerr << "try_rx callback: pid/tgid: " << pid << "/" << tgid << "\n";
                     if(check_pid(name, pid))
                         have = true; });
             if(have)
@@ -470,7 +471,7 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    for(size_t i = 0; i < 50; i++) {
+    for(size_t i = 0; i < 200; i++) {
         if(proc_iterate(name))
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
