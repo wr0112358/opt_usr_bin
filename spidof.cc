@@ -41,7 +41,6 @@ extern "C" {
 namespace {
 
 // Filter out all non-relevant messages in the kernel.
-// adapted from: http://netsplit.com/the-proc-connector-and-socket-filters
 void filter(int sock)
 {
     // return amount of bytes of the packet
@@ -303,16 +302,13 @@ struct fork_handler_t {
             total++;
             if((nlhdr->nlmsg_type == NLMSG_ERROR)
                || (nlhdr->nlmsg_type == NLMSG_NOOP)) {
+                // filter out?
                 assert(false);
                 continue;
             }
             struct cn_msg *cn_msg = (struct cn_msg *)NLMSG_DATA(nlhdr);
-            if((cn_msg->id.idx != CN_IDX_PROC)
-               || (cn_msg->id.val != CN_VAL_PROC)) {
-                assert(false);
-                continue;
-            }
-
+            assert((cn_msg->id.idx == CN_IDX_PROC)
+                   && (cn_msg->id.val == CN_VAL_PROC));
             ok++;
             std::cerr << "ok/total: " << ok << "/" << total << "\n";
 
@@ -369,11 +365,12 @@ static bool check_pid(const std::string &name, pid_t pid)
 
     // oneshot
     if(std::strncmp(name.c_str(), base, name.length()) == 0) {
+        std::cerr << "match: " << buff << "\n";
         std::cout << pid << "\n" << std::flush;
         return true;
     }
 
-    std::cerr << "mismatch: " << base << "\n";
+    std::cerr << "mismatch: " << buff << "\n";
     return false;
 }
 
