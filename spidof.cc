@@ -89,10 +89,32 @@ void filter(int sock)
         perror("setsockopt");
 }
 
+bool cap_set_if_not(cap_t caps, cap_flag_value_t val, cap_value_t *list, size_t size)
+{
+    cap_flag_value_t flag;
+    if(cap_get_flag(caps, list[0], CAP_EFFECTIVE, &flag) == -1) {
+        perror("cap_get_flag");
+        return false;
+    }
+
+    if(flag != val) {
+        if(cap_set_flag(caps, CAP_EFFECTIVE, size, list, val) == -1) {
+            perror("cap_set_flag");
+            return false;
+
+        }
+        if(cap_set_proc(caps) == -1) {
+            perror("cap_set_proc");
+            return false;
+        }
+    }
+    return true;
+}
+
+// Test if CAP_NET_ADMIN is effective, else make it effective
 bool get_priv()
 {
     cap_value_t cap_list[1] = { CAP_NET_ADMIN };
-
     if(!CAP_IS_SUPPORTED(CAP_NET_ADMIN)) {
         std::cerr << "Capability CAP_NET_ADMIN is not supported\n";
         return false;
@@ -111,72 +133,40 @@ bool get_priv()
         perror("cap_get_flag");
         goto out;
     }
-    if(flag == CAP_CLEAR) {
+    if(flag != CAP_SET) {
         std::cerr << "Capability CAP_NET_ADMIN is not CAP_PERMITTED, run setcap CAP_NET_ADMIN=p <binary>\n";
         goto out;
     }
 
-    // Test if CAP_NET_ADMIN is effective, else make it effective
-    if(cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == -1) {
-        perror("cap_get_flag");
-        goto out;
-    }
-
-    if(flag == CAP_CLEAR) {
-        if(cap_set_flag(caps, CAP_EFFECTIVE, 1, cap_list, CAP_SET) == -1) {
-            perror("cap_set_flag");
-            goto out;
-        }
-
-        if(cap_set_proc(caps) == -1) {
-            perror("cap_set_proc");
-            goto out;
-        }
-
-        assert(cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == 0
-               && flag == CAP_SET);
-    }
-    ret = true;
+    ret = cap_set_if_not(caps, CAP_SET, cap_list, 1);
+    assert(ret || (cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == 0
+                   && flag == CAP_SET));
 
 out:
     cap_free(caps);
     return ret;
 }
 
+// Drop CAP_NET_ADMIN to permitted if effective
 bool drop_priv()
 {
     cap_value_t cap_list[1] = { CAP_NET_ADMIN };
-    cap_flag_value_t flag;
-    bool ret = false;
-
     auto caps = cap_get_proc();
     if(caps == NULL) {
         perror("cap_get_proc");
         return false;
     }
 
-    if(cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == -1) {
-        perror("cap_get_flag");
-        goto out;
-    }
+    const auto ret = cap_set_if_not(caps, CAP_CLEAR, cap_list, 1);
 
-    // Drop CAP_NET_ADMIN to permitted if effective
-    if(flag == CAP_SET) {
-        if(cap_set_flag(caps, CAP_EFFECTIVE, 1, cap_list, CAP_CLEAR) == -1) {
-            perror("cap_set_flag");
-            goto out;
-        }
-        if(cap_set_proc(caps) == -1) {
-            perror("cap_set_proc");
-            goto out;
-        }
+#ifndef NDEBUG
+    cap_flag_value_t flag;
+    assert(!ret || (cap_get_flag(caps, cap_list[0], CAP_PERMITTED, &flag) == 0
+                    && flag == CAP_SET
+                    && cap_get_flag(caps, cap_list[0], CAP_EFFECTIVE, &flag) == 0
+                    && flag == CAP_CLEAR));
+#endif
 
-        assert(cap_get_flag(caps, cap_list[0], CAP_PERMITTED, &flag) == 0
-               && flag == CAP_SET);
-    }
-    ret = true;
-
-out:
     cap_free(caps);
     return ret;
 }
@@ -304,6 +294,7 @@ struct fork_handler_t {
             return;
         }
 
+        //std::cout << "have " << len << " bytes. pid=" << addr.nl_pid << "\n";
         // from kernel?
         if(addr.nl_pid != 0)
             return;
@@ -311,10 +302,10 @@ struct fork_handler_t {
             nlhdr = NLMSG_NEXT(nlhdr, len)) {
             total++;
             if((nlhdr->nlmsg_type == NLMSG_ERROR)
-               || (nlhdr->nlmsg_type == NLMSG_NOOP))
+               || (nlhdr->nlmsg_type == NLMSG_NOOP)) {
                 assert(false);
                 continue;
-
+            }
             struct cn_msg *cn_msg = (struct cn_msg *)NLMSG_DATA(nlhdr);
             if((cn_msg->id.idx != CN_IDX_PROC)
                || (cn_msg->id.val != CN_VAL_PROC)) {
@@ -382,7 +373,7 @@ static bool check_pid(const std::string &name, pid_t pid)
         return true;
     }
 
-//    std::cerr << "mismatch: " << base << "\n";
+    std::cerr << "mismatch: " << base << "\n";
     return false;
 }
 
