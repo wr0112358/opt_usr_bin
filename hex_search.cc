@@ -29,16 +29,79 @@ $ hex_search video.h264 000001 -A 1 -B 1
 
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
-#include <libaan/byte.hh>
-#include <libaan/debug.hh>
-#include <libaan/fd.hh>
-#include <libaan/string.hh>
-
 namespace {
+
+template<typename T>
+inline std::string to_hex_string(const T &value)
+{
+    std::ostringstream os;
+    os << std::hex << value << std::dec;
+    return os.str();
+}
+
+inline std::size_t roundtolast16(std::size_t val) { return val & ~15ull; }
+
+// Src must have an even number of [0-9a-f] characters.
+// In the uneven case it returns false and converted input.
+std::pair<bool, std::vector<unsigned char> > hex2bin(const char *src, size_t size_hint)
+{
+    auto ascii2bin = [](char input) {
+        if(input >= '0' && input <= '9')
+            return input - '0';
+        else if(input >= 'A' && input <= 'F')
+            return input - 'A' + 10;
+        else if(input >= 'a' && input <= 'f')
+            return input - 'a' + 10;
+        else
+            return -1;
+    };
+    std::vector<unsigned char> target;
+    if(size_hint) {
+        target.reserve(size_hint / 2);
+        size_hint = 0;
+    }
+
+    while(*src && src[1]) {
+        const auto a = ascii2bin(*src) * 16;
+        const auto b = ascii2bin(src[1]);
+        if(a < 0 || b < 0)
+            return std::make_pair(false, decltype(target)());
+        target.push_back(a + b);
+        src += 2;
+        size_hint++;
+    }
+
+    target.resize(size_hint);
+    return std::make_pair(!*src, target);
+}
+
+int readall(int fd, void *buff, size_t len)
+{
+    int n;
+    size_t nread = 0;
+
+    do {
+        n = read(fd, &((char *)buff)[nread], len-nread);
+        if(n == -1) {
+            if(errno == EINTR)
+                continue;
+            else
+                return -1;
+        }
+        if(n == 0)
+            return nread;
+        nread += n;
+    } while(nread < len);
+
+    return nread;
+}
+
 template<typename lambda_t>
 bool foreach_blob(const char *filename, size_t blobsize, lambda_t lambda)
 {
@@ -51,7 +114,7 @@ bool foreach_blob(const char *filename, size_t blobsize, lambda_t lambda)
     std::vector<char> buf(blobsize, 0);
     int ret;
     do {
-        ret = libaan::readall(fd, &buf[0], buf.size());
+        ret = readall(fd, &buf[0], buf.size());
         if(!lambda(buf, ret))
             break;
     } while(ret > 0);
@@ -79,8 +142,8 @@ bool printx_at(int fd, size_t off, size_t len)
 
     for(size_t i = 0; i < buf.size(); i++) {
         if(i % 16 == 0)
-            std::cout << leftpad_0(8, libaan::to_hex_string(libaan::roundtolast16(off + i))) << ": ";
-        std::cout << leftpad_0(2, libaan::to_hex_string((unsigned)buf[i]));
+            std::cout << leftpad_0(8, to_hex_string(roundtolast16(off + i))) << ": ";
+        std::cout << leftpad_0(2, to_hex_string((unsigned)buf[i]));
         if((i + 1) % 16 == 0)
             std::cout << "\n";
         else
@@ -101,7 +164,7 @@ bool print(const std::vector<size_t> &found,
     }
 
     for(const auto off: found) {
-        const auto o16 = libaan::roundtolast16(off);
+        const auto o16 = roundtolast16(off);
         if(before) {
             if(o16 >= (before * 16))
                 printx_at(fd, o16 - before * 16, before * 16);
@@ -179,7 +242,7 @@ int main(int argc, char *argv[])
     if(p_len % 2)
         return -1;
 
-    const auto bin_pattern = libaan::hex2bin(argv[2], p_len);
+    const auto bin_pattern = hex2bin(argv[2], p_len);
     if(!bin_pattern.first)
         return -1;
 

@@ -11,7 +11,6 @@ LDLIBS=-Wl,--as-needed
 
 color_regex: LDFLAGS+=$(shell pkg-config --libs libaan)
 color_regex: color_regex.cc
-hex_search: LDFLAGS+=$(shell pkg-config --libs libaan)
 hex_search: hex_search.cc
 open_shell_in_cwd_of: LDFLAGS+=$(shell pkg-config --libs libaan)
 open_shell_in_cwd_of: open_shell_in_cwd_of.cc
